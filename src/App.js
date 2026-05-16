@@ -1942,10 +1942,11 @@ export default function GolfApp() {
               const { teePin: tp, flagPin: fp } = pinsRef.current;
               const holeRef = tp || fp;
               const distToHole = holeRef ? haversineYards(lat, lng, holeRef.lat, holeRef.lng) : 0;
-              if (!holeRef || distToHole <= 500) {
+              if (holeRef && distToHole <= 500) {
+                // Only follow live GPS after we know the player is near the selected hole/course.
                 mapRef.current?.flyTo({ center: [lng, lat], zoom: 18, animate: false });
-              } else {
-                // Player is far from the hole — keep map focused on the hole
+              } else if (holeRef) {
+                // Player is far from the hole — keep map focused on the hole, not the user's private location.
                 const holeCenter = (tp && fp)
                   ? [(tp.lng + fp.lng) / 2, (tp.lat + fp.lat) / 2]
                   : [holeRef.lng, holeRef.lat];
@@ -1975,6 +1976,15 @@ export default function GolfApp() {
       }
     };
   }, [!!liveRound]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── MAP LOADING RECOVERY — don't let Live Round stay trapped behind loading overlay ──
+  useEffect(() => {
+    if (!liveRound) return;
+    const id = setTimeout(() => {
+      setMapTilesLoading(false);
+    }, 8000);
+    return () => clearTimeout(id);
+  }, [!!liveRound, liveRound?.currentHole]);
 
   // ── LIVE WEATHER — fetch from OpenWeatherMap when GPS is active, throttled to 10 min ──
   useEffect(() => {
@@ -3701,7 +3711,21 @@ export default function GolfApp() {
         const pinCenter = (teePin && flagPin)
           ? { lat: (teePin.lat + flagPin.lat) / 2, lng: (teePin.lng + flagPin.lng) / 2 }
           : teePin || flagPin || null;
-        const mapCenter = pinCenter || effectivePlayerPos || null;
+        // Safe map fallback:
+        // Prefer user/course pins, then known course geometry, then live GPS.
+        // This prevents Live Round from mounting into an unstable no-center state
+        // when GPS is denied/unavailable or pins have not been placed yet.
+        const courseFallbackCenter =
+          holeGeo?.green?.center ||
+          holeGeo?.green?.front ||
+          holeGeo?.green?.back ||
+          holeGeo?.tee ||
+          null;
+        // Privacy-safe map center:
+        // Do NOT fall back to raw user GPS as the default map center.
+        // If course/pin geometry is missing, show the fallback/recovery UI instead
+        // of exposing the user's current location on the map.
+        const mapCenter = pinCenter || courseFallbackCenter || null;
         const mapRenderCenter = mapCenter;
 
         // ── AUTO-ORIENT: bearing & zoom for initial map view when entering a hole ──
@@ -3843,9 +3867,12 @@ export default function GolfApp() {
                     mapboxAccessToken={MAPBOX_TOKEN}
                     mapStyle="mapbox://styles/mapbox/satellite-streets-v12"
                     initialViewState={{ longitude: (autoOrientCenter || mapRenderCenter || { lng: 0 }).lng, latitude: (autoOrientCenter || mapRenderCenter || { lat: 0 }).lat, zoom: autoOrientZoom, pitch: 0, bearing: autoOrientBearing }}
-                    style={{ width: "100%", height: "100%" }}
+                    style={{ width: "100%", height: "100%", pointerEvents: "none" }}
                     attributionControl={false}
-                    pitchWithRotate={true}
+                    interactive={false}
+                    pitchWithRotate={false}
+                    dragRotate={false}
+                    touchPitch={false}
                     onZoom={e => setMapZoom(e.viewState.zoom)}
                     onDragStart={() => { mapUserPannedRef.current = true; setMapUserPanned(true); }}
                     onZoomStart={e => { if (e.originalEvent) { mapUserPannedRef.current = true; setMapUserPanned(true); } }}
@@ -3887,7 +3914,8 @@ export default function GolfApp() {
                             maxzoom: 14,
                           });
                         }
-                        map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
+                        // Disabled during Phase 1: Mapbox 3D terrain was causing pointCoordinate3D/unproject runtime crashes.
+                        // map.setTerrain({ source: "mapbox-dem", exaggeration: 1.5 });
                       } catch (_) {}
 
                       // Inject invisible fill layers so water/landuse/natural are always
@@ -4019,7 +4047,7 @@ export default function GolfApp() {
                       })()}
                       {/* Player marker — green dot */}
                       {effectivePlayerPos && (
-                        <Marker longitude={effectivePlayerPos.lng} latitude={effectivePlayerPos.lat} anchor="center" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: placingMode ? "none" : "auto" }}>
+                        <Marker longitude={effectivePlayerPos.lng} latitude={effectivePlayerPos.lat} anchor="center" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}>
                           <div style={{ position: "relative", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
                             <div className="stroke-marker-halo" style={{ position: "absolute", width: 24, height: 24, borderRadius: "50%", background: "rgba(125,162,126,0.15)", border: "1px solid rgba(125,162,126,0.85)" }} />
                             <div style={{ width: 14, height: 14, borderRadius: "50%", background: Theme.primaryGreen, border: "2px solid #fff", boxShadow: "0 0 8px rgba(125,162,126,0.7)", zIndex: 1 }} />
@@ -4027,12 +4055,12 @@ export default function GolfApp() {
                         </Marker>
                       )}
                       {/* Course green markers — hidden when a manual flag is placed */}
-                      {!flagPin && greenFront  && <Marker longitude={greenFront.lng}  latitude={greenFront.lat}  anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: "#16a34a", border: "2px solid #052e16", boxShadow: "0 0 6px rgba(0,0,0,0.7)" }} /></Marker>}
-                      {!flagPin && greenCenter && <Marker longitude={greenCenter.lng} latitude={greenCenter.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 13, height: 13, borderRadius: "50%", background: "#15803d", border: "2px solid #052e16", boxShadow: "0 0 8px rgba(0,0,0,0.7)" }} /></Marker>}
-                      {!flagPin && greenBack   && <Marker longitude={greenBack.lng}   latitude={greenBack.lat}   anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: "#166534", border: "2px solid #052e16", boxShadow: "0 0 6px rgba(0,0,0,0.7)" }} /></Marker>}
+                      {!flagPin && greenFront  && <Marker longitude={greenFront.lng}  latitude={greenFront.lat}  anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: "#16a34a", border: "2px solid #052e16", boxShadow: "0 0 6px rgba(0,0,0,0.7)" }} /></Marker>}
+                      {!flagPin && greenCenter && <Marker longitude={greenCenter.lng} latitude={greenCenter.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 13, height: 13, borderRadius: "50%", background: "#15803d", border: "2px solid #052e16", boxShadow: "0 0 8px rgba(0,0,0,0.7)" }} /></Marker>}
+                      {!flagPin && greenBack   && <Marker longitude={greenBack.lng}   latitude={greenBack.lat}   anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: "#166534", border: "2px solid #052e16", boxShadow: "0 0 6px rgba(0,0,0,0.7)" }} /></Marker>}
                       {/* Manual Tee Pin — only shown when user explicitly dropped it */}
                       {teePin && teePinManual && (
-                        <Marker key="tee-marker" longitude={teePin.lng} latitude={teePin.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: "none" }}>
+                        <Marker key="tee-marker" longitude={teePin.lng} latitude={teePin.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", filter: "drop-shadow(0 0 5px rgba(59,130,246,0.9))" }}>
                             <svg width="16" height="26" viewBox="0 0 16 26">
                               <ellipse cx="8" cy="5" rx="7" ry="3" fill="#fff"/>
@@ -4044,7 +4072,7 @@ export default function GolfApp() {
                       )}
                       {/* Manual Flag Pin — locked once placed */}
                       {flagPin && (
-                        <Marker key="flag-marker" longitude={flagPin.lng} latitude={flagPin.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: "none" }}>
+                        <Marker key="flag-marker" longitude={flagPin.lng} latitude={flagPin.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", filter: "drop-shadow(0 0 5px rgba(239,68,68,0.9))" }}>
                             <svg width="24" height="38" viewBox="0 0 24 38">
                               <line x1="6" y1="3" x2="6" y2="36" stroke="#fff" strokeWidth="2" strokeLinecap="round"/>
@@ -4057,7 +4085,7 @@ export default function GolfApp() {
                       {/* Hazard markers */}
                       {holeGeo?.hazards?.map((hz, hi) =>
                         hz.coords?.map((pt, pi) => (
-                          <Marker key={`hz-${hi}-${pi}`} longitude={pt.lng} latitude={pt.lat} anchor="center" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: "none" }}>
+                          <Marker key={`hz-${hi}-${pi}`} longitude={pt.lng} latitude={pt.lat} anchor="center" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                             <div style={{ width: 12, height: 12, borderRadius: "50%", background: hz.type === "water" ? "#2563eb" : hz.type === "ob" ? "#dc2626" : "#ca8a04", border: "1.5px solid #000", boxShadow: "0 0 4px rgba(0,0,0,0.6)" }} />
                           </Marker>
                         ))
@@ -4065,7 +4093,7 @@ export default function GolfApp() {
 
                       {/* ── Previous round shot dots (faded) ── */}
                       {(profile.courseShots?.[liveRound?.course]?.holes?.[currentHole] || []).map((shot, si) => (
-                        <Marker key={`prev-shot-${si}`} longitude={shot.lng} latitude={shot.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: "none" }}>
+                        <Marker key={`prev-shot-${si}`} longitude={shot.lng} latitude={shot.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                             <div style={{ background: "rgba(0,0,0,0.5)", borderRadius: 5, padding: "1px 5px", border: "1px solid rgba(156,163,175,0.35)" }}>
                               <span style={{ fontSize: 9, fontFamily: "Bebas Neue", color: "rgba(156,163,175,0.65)", letterSpacing: 0.5 }}>{shot.club}</span>
@@ -4081,7 +4109,7 @@ export default function GolfApp() {
                         const dotColor = isOB ? "#ef4444" : "#fbbf24";
                         const borderColor = isOB ? "rgba(239,68,68,0.6)" : "rgba(251,191,36,0.5)";
                         return (
-                          <Marker key={`shot-${si}`} longitude={shot.lng} latitude={shot.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" occludedOpacity={0} style={{ pointerEvents: "none" }}>
+                          <Marker key={`shot-${si}`} longitude={shot.lng} latitude={shot.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                               <div style={{ background: "rgba(0,0,0,0.72)", borderRadius: 5, padding: "1px 5px", border: `1px solid ${borderColor}` }}>
                                 <span style={{ fontSize: 9, fontFamily: "Bebas Neue", color: dotColor, letterSpacing: 0.5 }}>{shot.club}</span>
@@ -4118,6 +4146,13 @@ export default function GolfApp() {
                         REQUEST PERMISSION
                       </button>
                     )}
+
+                    <button
+                      onClick={abandonLiveRound}
+                      style={{ marginTop: 8, padding: "8px 20px", background: "transparent", color: "#ef4444", fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 2, border: "1px solid rgba(239,68,68,0.5)", borderRadius: 6, cursor: "pointer" }}
+                    >
+                      EXIT LIVE ROUND
+                    </button>
                   </div>
                 )}
             </div>{/* ── end absoluteFill map canvas ── */}
