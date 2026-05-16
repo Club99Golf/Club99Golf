@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users — anyone authed can read; only owner can write their own doc
+    // Exception: any authed user can update crewId/crewName (needed for crew accept)
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create, delete: if request.auth != null && request.auth.uid == uid;
+      allow update: if request.auth != null && (
+        request.auth.uid == uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['crewId', 'crewName'])
+      );
+    }
+
+    // Courses — public read; any authed user can contribute
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Friends & friend requests — any authed user
+    match /friends/{docId} {
+      allow read, write: if request.auth != null;
+    }
+    match /friendRequests/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Reactions & comments — public read; any authed user can react/comment
+    match /reactions/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /reactions/{docId}/comments/{commentId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Challenges — public read so anyone can see open rounds;
+    // any authed user can post or join
+    match /challenges/{challengeId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Notifications — only the recipient can read; any authed user can create
+    match /notifications/{notifId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.toUid;
+      allow create: if request.auth != null;
+    }
+
+    // Crews — public read; any authed user can create/update
+    match /crews/{crewId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Crew join requests — any authed user can create; crew leader can read/delete
+    match /crewRequests/{requestId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Community course pins — public read; any authed user can contribute
+    match /global_course_pins/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+  }
+}
