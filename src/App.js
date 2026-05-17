@@ -345,8 +345,6 @@ function _isWaterAtPoint(map, pos) {
       ? map.queryRenderedFeatures(bbox, { layers: availableLayers })
       : map.queryRenderedFeatures(bbox);
 
-    console.log('Hazard Detection layers found:', features);
-
     return features.some(f => {
       const sl  = f.sourceLayer || '';
       const lid = f.layer?.id   || '';
@@ -511,6 +509,15 @@ function getRecommendedClub(targetYards, bagItems) {
 }
 
 const CLUB_ACCENT = "#000000";
+
+// MVP course map centers.
+// These are safe course-level centers used only to open Mapbox for pin setup.
+// Tee/flag pins are still user/community-created and saved separately.
+const COURSE_MAP_CENTERS = {
+  "Northern Bay Resort (Castle Course)": { lat: 43.8928, lng: -89.7896 },
+  "Kiawah Island (Ocean Course)": { lat: 32.613026, lng: -80.019651 },
+  "Pebble Beach Golf Links": { lat: 36.5689, lng: -121.9506 },
+};
 
 // ─── Hole Pin Layout Persistence (localStorage) ───────────────────────────────
 // Key: "pins_<slugified course>_h<0-indexed hole>"
@@ -991,24 +998,63 @@ async function saveProfileToFirestore(uid, profile) {
 }
 
 // Recalculates OVR, level, rounds array from stored history for a single profile object
+function sanitizeBagDistances(bag = []) {
+  return (bag || []).map(item => {
+    const d = parseFloat(item.distance);
+    if (!Number.isFinite(d) || d <= 0 || d > 500) {
+      return { ...item, distance: "", trackedCount: 0 };
+    }
+    return item;
+  });
+}
+
 function repairProfile(p) {
   if (!p || !p.history) return p;
-  const roundOVRs = p.history.slice(0, 10).map(r => r.roundOVR).filter(v => v != null && !isNaN(v));
+
+  // history is stored newest-first, but calcOVRFromRounds expects rounds oldest→newest
+  // so the most recent round receives the strongest recency weight.
+  const recentHistory = p.history.slice(0, 10);
+  const roundOVRsNewestFirst = recentHistory
+    .map(r => r.roundOVR)
+    .filter(v => v != null && !isNaN(v));
+  const roundOVRs = [...roundOVRsNewestFirst].reverse();
+
   // Users with 0 rounds get a clean slate: OVR 50, all attrs zeroed
   if (roundOVRs.length === 0) {
-    return { ...p, ovr: 50, rounds: [], attrs: { PWR: 0, ACC: 0, CON: 0, REC: 0, EFF: 0 }, experience: 0, level: 1, coins: Math.max(0, p.coins || 0) };
+    return {
+      ...p,
+      bag: sanitizeBagDistances(p.bag || []),
+      ovr: 50,
+      rounds: [],
+      attrs: { PWR: 0, ACC: 0, CON: 0, REC: 0, EFF: 0 },
+      experience: 0,
+      level: 1,
+      coins: Math.max(0, p.coins || 0)
+    };
   }
+
   const correctOVR = calcOVRFromRounds(roundOVRs);
+
   // Recompute cumulative attrs from history attrDeltas
   const correctedAttrs = { PWR: 0, ACC: 0, CON: 0, REC: 0, EFF: 0 };
   p.history.forEach(r => {
     if (r.attrDeltas) Object.keys(correctedAttrs).forEach(k => { correctedAttrs[k] += (r.attrDeltas[k] || 0); });
   });
+
   // Experience = total coins ever earned (drives level). Recompute from history.
   const correctExperience = p.history.reduce((sum, r) => sum + (r.coins || 0), 0);
   const correctLevel = levelFromXP(correctExperience);
+
   // Preserve actual coin balance — don't recalculate it
-  return { ...p, ovr: correctOVR, rounds: roundOVRs, experience: correctExperience, level: correctLevel, attrs: correctedAttrs };
+  return {
+    ...p,
+    bag: sanitizeBagDistances(p.bag || []),
+    ovr: correctOVR,
+    rounds: roundOVRs,
+    experience: correctExperience,
+    level: correctLevel,
+    attrs: correctedAttrs
+  };
 }
 
 // Runs on login — silently fixes own profile if OVR is wrong
@@ -2278,15 +2324,15 @@ export default function GolfApp() {
       searchGolfCourseAPI(val),
       localMatches.length > 0 ? Promise.resolve([]) : searchCoursesInFirestore(val),
     ]);
+    console.log("[CourseSearch Debug]", { val, localMatches, apiResults });
     const apiMatches = apiResults
-      .filter(c => !localMatches.some(l => l.name.toLowerCase() === (c.club_name || c.course_name).toLowerCase()))
       .map(c => ({
         name: c.club_name || c.course_name,
         apiId: c.id,
         location: c.location,
         source: "golfcourseapi",
       }));
-    setCourseSuggestions([...localMatches, ...apiMatches, ...(localMatches.length > 0 ? [] : firestoreResults)]);
+    setCourseSuggestions([...apiMatches, ...localMatches, ...(localMatches.length > 0 ? [] : firestoreResults)]);
   }
   async function selectCourse(course) {
     setEditCourse(course.name);
@@ -2341,6 +2387,15 @@ export default function GolfApp() {
   const profileLoadedRef = useRef(false);
   const roundSubmittedRef = useRef(false); // prevents in-flight liveRound writes from racing submit
   const roundSavingRef = useRef(false);   // suppresses redundant useEffect write while submit await is in progress
+  useEffect(() => {
+    if (!authUser || !profileLoadedRef.current) return;
+    const cleanedBag = sanitizeBagDistances(profile.bag || []);
+    const changed = JSON.stringify(cleanedBag) !== JSON.stringify(profile.bag || []);
+    if (!changed) return;
+    setProfile(p => ({ ...p, bag: cleanedBag }));
+    setDoc(doc(db, "users", authUser.uid), { bag: cleanedBag }, { merge: true }).catch(() => {});
+  }, [authUser?.uid, profile.bag]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (authUser && profile.username && !deletingRef.current && profileLoadedRef.current && !roundSavingRef.current) {
       saveProfileToFirestore(authUser.uid, profile);
@@ -2436,6 +2491,15 @@ export default function GolfApp() {
     // If a GolfCourseAPI course is selected, use its verified pars + rating/slope
     let holePars;
     let apiOverrides = {};
+    if (selectedApiCourse?.location) {
+      // Store course lat/lng even if tee data lookup fails.
+      // This gives Live Round a safe course-level map center without exposing raw user GPS.
+      apiOverrides.apiCourseLocation = {
+        lat: selectedApiCourse.location.latitude,
+        lng: selectedApiCourse.location.longitude
+      };
+      apiOverrides.apiCourseId = selectedApiCourse.id;
+    }
     if (selectedApiCourse) {
       const apiTee = extractApiTeeData(selectedApiCourse, tee);
       if (apiTee) {
@@ -2444,13 +2508,9 @@ export default function GolfApp() {
           ? (nineSide === "back" ? apiTee.holePars.slice(9) : apiTee.holePars.slice(0, 9))
           : apiTee.holePars;
         apiOverrides = {
+          ...apiOverrides,
           overrideRating: apiTee.rating,
           overrideSlope:  apiTee.slope,
-          // Store course lat/lng so the map can fly to the course on start
-          apiCourseLocation: selectedApiCourse.location
-            ? { lat: selectedApiCourse.location.latitude, lng: selectedApiCourse.location.longitude }
-            : null,
-          apiCourseId: selectedApiCourse.id,
         };
       }
     }
@@ -2720,6 +2780,13 @@ export default function GolfApp() {
   // Stores trackedCount on each bag item so subsequent shots keep refining the average.
   // Also applies GPS-based PWR/ACC attr gains when the shot qualifies.
   function updateClubAverage(clubIdx, yards) {
+    if (!Number.isFinite(yards) || yards <= 0 || yards > 500) {
+      console.warn("[ClubAverage] Ignored invalid shot distance:", yards);
+      setShotInFairway(false);
+      setPendingShotEndPos(null);
+      setPendingShotYards(null);
+      return;
+    }
     // Compute gains from current snapshot (before the updater runs)
     const currentItem = (profile.bag || [])[clubIdx] || {};
     const prevAvg = parseFloat(currentItem.distance) || 0;
@@ -2733,7 +2800,8 @@ export default function GolfApp() {
       const bag = [...(p.bag || [])];
       const item = { ...bag[clubIdx] };
       const count = item.trackedCount || 0;
-      const pAvg = parseFloat(item.distance) || 0;
+      let pAvg = parseFloat(item.distance) || 0;
+      if (!Number.isFinite(pAvg) || pAvg < 0 || pAvg > 500) pAvg = 0;
       const newAvg = (count === 0 || pAvg === 0)
         ? yards
         : Math.round((pAvg * count + yards) / (count + 1));
@@ -2959,7 +3027,7 @@ export default function GolfApp() {
         </div>
 
         {/* Error */}
-        {authError && <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center", fontFamily: "'Inter',sans-serif" }}>{authError}</div>}
+        {authError && <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 14, textAlign: "center", fontFamily: "'Inter',sans-serif" }}>{authError}</div>}
 
         {/* Submit */}
         <button
@@ -3434,12 +3502,15 @@ export default function GolfApp() {
                 <div style={{ fontSize: 9, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, marginBottom: 5 }}>COURSE NAME</div>
                 <div style={{ position: "relative", marginBottom: 12 }}>
                   <input value={editCourse} onChange={e => handleCourseSearch(e.target.value)} placeholder="Search course name…" style={S.fInput} />
+                  <div style={{ fontSize: 9, color: selectedApiCourse ? Theme.primaryGreen : "#9ca3af", fontWeight: 700, marginTop: 4 }}>
+                    {selectedApiCourse ? "📡 GolfCourseAPI course selected — map location available" : "Choose a dropdown result for best map support"}
+                  </div>
                   {courseSuggestions.length > 0 && (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, zIndex: 10, boxShadow: "0 4px 12px rgba(0,0,0,0.1)", overflow: "hidden" }}>
                       {courseSuggestions.map((c, i) => (
-                        <div key={i} onClick={() => selectCourse(c)} style={{ padding: "9px 12px", cursor: "pointer", borderBottom: "1px solid #f0f0f0", fontSize: 12, fontWeight: 600 }}>
+                        <div key={i} onClick={() => selectCourse(c)} style={{ padding: "12px 12px", cursor: "pointer", borderBottom: "1px solid #f0f0f0", fontSize: 12, fontWeight: 600 }}>
                           <div style={{ color: "#111827", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                            {c.name}
+                            {c.source === "golfcourseapi" ? "📡 " : ""}{c.name}
                             {c.community && (
                               <span style={{ fontSize: 8, fontWeight: 800, background: c.communityVerified ? "#dcfce7" : "#fef3c7", color: c.communityVerified ? "#16a34a" : "#92400e", border: `1px solid ${c.communityVerified ? "#86efac" : "#fde68a"}`, borderRadius: 4, padding: "1px 5px", letterSpacing: 0.5 }}>
                                 {c.communityVerified ? "✓ VERIFIED" : `COMMUNITY ${c.verificationCount || 1}/5`}
@@ -3720,6 +3791,8 @@ export default function GolfApp() {
           holeGeo?.green?.front ||
           holeGeo?.green?.back ||
           holeGeo?.tee ||
+          liveRound?.apiCourseLocation ||
+          COURSE_MAP_CENTERS[course] ||
           null;
         // Privacy-safe map center:
         // Do NOT fall back to raw user GPS as the default map center.
@@ -3727,6 +3800,7 @@ export default function GolfApp() {
         // of exposing the user's current location on the map.
         const mapCenter = pinCenter || courseFallbackCenter || null;
         const mapRenderCenter = mapCenter;
+
 
         // ── AUTO-ORIENT: bearing & zoom for initial map view when entering a hole ──
         // Uses tee→green bearing so the pin is always "up" when the hole loads.
@@ -3764,15 +3838,19 @@ export default function GolfApp() {
           : null;
         const onCourse = distFromCourse != null && distFromCourse < 500;
         // On course: live GPS-to-flag. Off course: static tee-to-flag (or GPS if no tee).
-        const pinYards = effectiveFlag
+        let pinYards = effectiveFlag
           ? (onCourse && effectivePlayerPos
               ? haversineYards(effectivePlayerPos.lat, effectivePlayerPos.lng, effectiveFlag.lat, effectiveFlag.lng)
               : effectiveTee
                 ? haversineYards(effectiveTee.lat, effectiveTee.lng, effectiveFlag.lat, effectiveFlag.lng)
-                : effectivePlayerPos
-                  ? haversineYards(effectivePlayerPos.lat, effectivePlayerPos.lng, effectiveFlag.lat, effectiveFlag.lng)
-                  : null)
+                : null)
           : null;
+
+        // Sanity guard: do not display absurd GPS/map distances.
+        // If tee/flag/course data is incomplete or mismatched, fail gracefully instead.
+        if (pinYards != null && (!Number.isFinite(pinYards) || pinYards < 0 || pinYards > 1000)) {
+          pinYards = null;
+        }
 
         // PWR adjustment: high PWR → player carries farther → suggest shorter club.
         // Neutral baseline is PWR 70. Each point = ±0.3% carry shift.
@@ -3867,15 +3945,19 @@ export default function GolfApp() {
                     mapboxAccessToken={MAPBOX_TOKEN}
                     mapStyle="mapbox://styles/mapbox/satellite-streets-v12"
                     initialViewState={{ longitude: (autoOrientCenter || mapRenderCenter || { lng: 0 }).lng, latitude: (autoOrientCenter || mapRenderCenter || { lat: 0 }).lat, zoom: autoOrientZoom, pitch: 0, bearing: autoOrientBearing }}
-                    style={{ width: "100%", height: "100%", pointerEvents: "none" }}
+                    style={{ width: "100%", height: "100%" }}
                     attributionControl={false}
-                    interactive={false}
+                    dragPan={true}
+                    scrollZoom={true}
+                    doubleClickZoom={true}
+                    keyboard={true}
                     pitchWithRotate={false}
                     dragRotate={false}
                     touchPitch={false}
                     onZoom={e => setMapZoom(e.viewState.zoom)}
                     onDragStart={() => { mapUserPannedRef.current = true; setMapUserPanned(true); }}
                     onZoomStart={e => { if (e.originalEvent) { mapUserPannedRef.current = true; setMapUserPanned(true); } }}
+                    onMoveStart={e => { if (e.originalEvent) { mapUserPannedRef.current = true; setMapUserPanned(true); } }}
                     onLoad={({ target: map }) => {
                       mapRef.current = map;
                       setMapTilesLoading(false);
@@ -3925,7 +4007,6 @@ export default function GolfApp() {
                         [
                           { id: '_hz-water',   sourceLayer: 'water'   },
                           { id: '_hz-landuse', sourceLayer: 'landuse' },
-                          { id: '_hz-natural', sourceLayer: 'natural' },
                         ].forEach(({ id, sourceLayer }) => {
                           if (!map.getLayer(id)) {
                             map.addLayer({
@@ -3972,10 +4053,11 @@ export default function GolfApp() {
                       {/* ── Target Crosshair ── draggable, club-recommending ── */}
                       {targetPin && (() => {
                         // Distance from current GPS position to the target
-                        const fromPos = effectivePlayerPos;
-                        const targetDist = fromPos
+                        const fromPos = onCourse ? effectivePlayerPos : effectiveTee;
+                        let targetDist = fromPos
                           ? Math.round(haversineYards(fromPos.lat, fromPos.lng, targetPin.lat, targetPin.lng))
                           : null;
+                        if (targetDist != null && (!Number.isFinite(targetDist) || targetDist < 0 || targetDist > 1000)) targetDist = null;
                         const targetClub = (targetDist != null && sortedBagClubs.length > 0)
                           ? sortedBagClubs.find(c => parseFloat(c.distance) <= targetDist) || null
                           : null;
@@ -4026,7 +4108,7 @@ export default function GolfApp() {
                                     {targetClub.club} · {Math.round(parseFloat(targetClub.distance))}y
                                   </span>
                                 ) : (
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.55)", whiteSpace: "nowrap" }}>No club in range</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.55)", whiteSpace: "nowrap" }}>Set target distance</span>
                                 )}
                                 {targetDist != null && (
                                   <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)", letterSpacing: 0.3 }}>{targetDist}y from you</span>
@@ -4059,7 +4141,7 @@ export default function GolfApp() {
                       {!flagPin && greenCenter && <Marker longitude={greenCenter.lng} latitude={greenCenter.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 13, height: 13, borderRadius: "50%", background: "#15803d", border: "2px solid #052e16", boxShadow: "0 0 8px rgba(0,0,0,0.7)" }} /></Marker>}
                       {!flagPin && greenBack   && <Marker longitude={greenBack.lng}   latitude={greenBack.lat}   anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: "#166534", border: "2px solid #052e16", boxShadow: "0 0 6px rgba(0,0,0,0.7)" }} /></Marker>}
                       {/* Manual Tee Pin — only shown when user explicitly dropped it */}
-                      {teePin && teePinManual && (
+                      {teePin && (
                         <Marker key="tee-marker" longitude={teePin.lng} latitude={teePin.lat} anchor="bottom" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: "none" }}>
                           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", filter: "drop-shadow(0 0 5px rgba(59,130,246,0.9))" }}>
                             <svg width="16" height="26" viewBox="0 0 16 26">
@@ -4121,11 +4203,23 @@ export default function GolfApp() {
                       })}
                     </Map>
                 ) : (
-                  <div style={{ height: "100%", background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                    <div style={{ fontSize: 22 }}>{gpsPermissionDenied ? "🚫" : "📡"}</div>
-                    <div style={{ fontSize: 11, color: Theme.primaryGreen, fontWeight: 800, letterSpacing: 2, fontFamily: "Bebas Neue" }}>
-                      {gpsPermissionDenied ? "GPS ACCESS DENIED" : "ACQUIRING GPS SIGNAL"}
+                  <div style={{ height: "100%", background: "radial-gradient(circle at center, #111827 0%, #020617 65%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 24, textAlign: "center" }}>
+                    <div style={{ fontSize: 28 }}>{gpsPermissionDenied ? "🚫" : "📍"}</div>
+
+                    <div style={{ fontSize: 18, color: Theme.primaryGreen, fontWeight: 900, letterSpacing: 2, fontFamily: "Bebas Neue" }}>
+                      COURSE MAP SETUP NEEDED
                     </div>
+
+                    <div style={{ maxWidth: 320, fontSize: 12, color: "rgba(255,255,255,0.72)", lineHeight: 1.45, fontFamily: "'DM Sans', sans-serif" }}>
+                      This course or hole does not have saved tee/flag coordinates yet. Use the TEE and FLAG buttons on the left to place pins and map this hole. Saved and community-confirmed pins will load automatically next time.
+                    </div>
+
+                    {gpsPermissionDenied && (
+                      <div style={{ maxWidth: 300, fontSize: 11, color: "rgba(239,68,68,0.8)", lineHeight: 1.4, fontFamily: "'DM Sans', sans-serif" }}>
+                        GPS access is currently denied. The app will not use your private location as the default map center.
+                      </div>
+                    )}
+
                     {gpsPermissionDenied && (
                       <button
                         onClick={() => {
@@ -4141,15 +4235,15 @@ export default function GolfApp() {
                             { enableHighAccuracy: true, timeout: 15000 }
                           );
                         }}
-                        style={{ marginTop: 8, padding: "8px 20px", background: Theme.primaryGreen, color: "#000", fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 2, border: "none", borderRadius: 6, cursor: "pointer" }}
+                        style={{ marginTop: 10, padding: "9px 22px", background: Theme.primaryGreen, color: "#000", fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 2, border: "none", borderRadius: 8, cursor: "pointer" }}
                       >
-                        REQUEST PERMISSION
+                        REQUEST GPS
                       </button>
                     )}
 
                     <button
                       onClick={abandonLiveRound}
-                      style={{ marginTop: 8, padding: "8px 20px", background: "transparent", color: "#ef4444", fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 2, border: "1px solid rgba(239,68,68,0.5)", borderRadius: 6, cursor: "pointer" }}
+                      style={{ marginTop: 6, padding: "9px 22px", background: "transparent", color: "#ef4444", fontFamily: "Bebas Neue", fontSize: 13, letterSpacing: 2, border: "1px solid rgba(239,68,68,0.5)", borderRadius: 8, cursor: "pointer" }}
                     >
                       EXIT LIVE ROUND
                     </button>
@@ -4167,8 +4261,8 @@ export default function GolfApp() {
 
 
             {/* ══ EMPTY-STATE TOOLTIP — shown until pins are placed ══ */}
-            {!targetPin && !flagPin && !teePin && !placingMode && mapCenter && !mapTilesLoading && (
-              <div style={{ position: "absolute", bottom: 58, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: "rgba(0,0,0,0.78)", borderRadius: 20, padding: "8px 18px", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(12px)", pointerEvents: "none", whiteSpace: "nowrap", animation: "fadeUp 0.5s ease" }}>
+            {!targetPin && !flagPin && !teePin && !placingMode && mapCenter && !mapTilesLoading && false && (
+              <div style={{ position: "absolute", bottom: 118, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: "rgba(0,0,0,0.78)", borderRadius: 20, padding: "8px 18px", border: "1px solid rgba(255,255,255,0.14)", backdropFilter: "blur(12px)", pointerEvents: "none", whiteSpace: "nowrap", animation: "fadeUp 0.5s ease" }}>
                 <span style={{ fontSize: 11, fontFamily: "'Inter',sans-serif", fontWeight: 600, color: "rgba(255,255,255,0.82)", letterSpacing: 0.3 }}>
                   <span style={{ color: Theme.primaryGreen, fontWeight: 800 }}>Tap</span> to drop target · use buttons to place tee & flag
                 </span>
@@ -4177,13 +4271,23 @@ export default function GolfApp() {
 
             {/* ══ COMMUNITY PINS BADGE ══ */}
             {communityPinSource && !placingMode && (
-              <div style={{ position: "absolute", bottom: 58, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: "rgba(26,26,26,0.88)", borderRadius: 20, padding: "5px 14px", border: `1px solid rgba(212,175,55,0.45)`, backdropFilter: "blur(12px)", pointerEvents: "none", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ position: "absolute", bottom: 118, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: "rgba(26,26,26,0.88)", borderRadius: 20, padding: "5px 14px", border: `1px solid rgba(212,175,55,0.45)`, backdropFilter: "blur(12px)", pointerEvents: "none", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
                 <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                   <circle cx="6" cy="6" r="5.5" stroke={Theme.mutedGold} strokeWidth="1.2"/>
                   <path d="M4 6l1.5 1.5L8.5 4" stroke={Theme.mutedGold} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
                 <span style={{ fontSize: 9, fontFamily: "Bebas Neue", color: Theme.mutedGold, letterSpacing: 1.5 }}>
                   PINS LOADED · {communityPinCount} {communityPinCount === 1 ? "GOLFER" : "GOLFERS"}
+                </span>
+              </div>
+            )}
+
+            {/* ══ LOCAL SAVED PINS BADGE ══ */}
+            {!communityPinSource && !placingMode && (teePin || flagPin) && (
+              <div style={{ position: "absolute", bottom: 118, left: "50%", transform: "translateX(-50%)", zIndex: 20, background: "rgba(17,24,39,0.88)", borderRadius: 20, padding: "5px 14px", border: "1px solid rgba(34,197,94,0.45)", backdropFilter: "blur(12px)", pointerEvents: "none", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 10 }}>💾</span>
+                <span style={{ fontSize: 9, fontFamily: "Bebas Neue", color: Theme.primaryGreen, letterSpacing: 1.5 }}>
+                  SAVED PINS LOADED
                 </span>
               </div>
             )}
@@ -4199,15 +4303,18 @@ export default function GolfApp() {
 
             {/* ══ FOUND BALL / OB — bottom-center ══ */}
             {playerPos && !placingMode && teePin && flagPin && playerSpeed < 1 && (
-              <div style={{ position: "absolute", bottom: 58, left: "50%", transform: "translateX(-50%)", zIndex: 25, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+              <div style={{ position: "absolute", bottom: 64, left: "50%", transform: "translateX(-50%)", zIndex: 25, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
                 {(() => {
                   const currentShots = shotHistoryArr[currentHole] || [];
                   const lastNonOB = currentShots.filter(s => s.club !== "OB").slice(-1)[0];
                   const fromPos = lastNonOB || teePin;
-                  const d = Math.round(haversineYards(fromPos.lat, fromPos.lng, playerPos.lat, playerPos.lng));
+                  const trackingPos = onCourse ? playerPos : targetPin;
+                  const d = trackingPos
+                    ? Math.round(haversineYards(fromPos.lat, fromPos.lng, trackingPos.lat, trackingPos.lng))
+                    : null;
                   return <span style={{ fontSize: 9, fontFamily: "Bebas Neue", color: "rgba(255,255,255,0.5)", letterSpacing: 1.5 }}>{d}y {lastNonOB ? "from last shot" : "from tee"}</span>;
                 })()}
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 14, alignItems: "center", background: "rgba(0,0,0,0.35)", padding: "6px", borderRadius: 30, backdropFilter: "blur(10px)" }}>
                   <button
                     onClick={() => {
                       hapticTap();
@@ -4224,10 +4331,20 @@ export default function GolfApp() {
                         setAttrToast("PUTT TRACKED");
                         setTimeout(() => setAttrToast(null), 1500);
                       } else {
-                        const yards = Math.round(haversineYards(fromPos.lat, fromPos.lng, playerPos.lat, playerPos.lng));
+                        const trackingPos = onCourse ? playerPos : targetPin;
+                        const yards = trackingPos
+                          ? Math.round(haversineYards(fromPos.lat, fromPos.lng, trackingPos.lat, trackingPos.lng))
+                          : null;
                         setShotInFairway(false);
-                        setPendingShotYards(yards);
-                        setPendingShotEndPos({ lat: playerPos.lat, lng: playerPos.lng });
+                        if (Number.isFinite(yards) && yards > 0 && yards <= 500) {
+                          setPendingShotYards(yards);
+                        } else {
+                          setAttrToast("Set a target location before tracking the shot");
+                          setTimeout(() => setAttrToast(null), 1800);
+                        }
+                        if (trackingPos) {
+                          setPendingShotEndPos({ lat: trackingPos.lat, lng: trackingPos.lng });
+                        }
                         setLiveStrokesArr(a => { const n = [...a]; n[currentHole] = (n[currentHole] ?? 0) + 1; return n; });
                         setLiveRound(r => { const sc = [...r.scores]; sc[currentHole] = (sc[currentHole] ?? 0) + 1; const next = { ...r, scores: sc }; if (authUser && !roundSubmittedRef.current) setDoc(doc(db, "users", authUser.uid), { liveRound: next }, { merge: true }).catch(() => {}); return next; });
                       }
@@ -4248,7 +4365,7 @@ export default function GolfApp() {
                       setAttrToast("OB · +2 STROKES");
                       setTimeout(() => setAttrToast(null), 2000);
                     }}
-                    style={{ background: "rgba(220,38,38,0.15)", border: "1.5px solid rgba(220,38,38,0.4)", backdropFilter: "blur(12px)", borderRadius: 24, padding: "8px 14px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                    style={{ background: "rgba(220,38,38,0.15)", border: "1.5px solid rgba(220,38,38,0.4)", backdropFilter: "blur(12px)", borderRadius: 22, padding: "8px 16px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
                   >
                     <span style={{ fontSize: 12, fontFamily: "Bebas Neue", color: "#ef4444", letterSpacing: 1.5 }}>OB</span>
                   </button>
