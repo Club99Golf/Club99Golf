@@ -4,7 +4,7 @@ import { COURSE_DB } from "./courses";
 import Map, { Marker, Source, Layer } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { initializeApp } from "firebase/app";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { getAuth, initializeAuth, browserLocalPersistence, setPersistence, inMemoryPersistence, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, deleteUser, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 import { getFirestore, initializeFirestore, persistentLocalCache, doc, setDoc, getDoc, getDocFromCache, collection, getDocs, query, where, orderBy, limit, deleteDoc, addDoc, serverTimestamp, onSnapshot, runTransaction, updateDoc, deleteField } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { loadStripe } from "@stripe/stripe-js";
@@ -80,7 +80,16 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
+const auth = (() => {
+  try {
+    const isCapacitor = typeof window !== "undefined" && !!window.Capacitor;
+    return initializeAuth(firebaseApp, {
+      persistence: isCapacitor ? inMemoryPersistence : browserLocalPersistence
+    });
+  } catch (e) {
+    return getAuth(firebaseApp);
+  }
+})();
 // Use persistentLocalCache so writes are cached to IndexedDB and survive page refreshes
 const db = initializeFirestore(firebaseApp, { localCache: persistentLocalCache() });
 
@@ -1754,6 +1763,17 @@ function loadProfilePic() { try { return localStorage.getItem("club99_pic") || n
 
 
 export default function GolfApp() {
+  const [isMobileLayout, setIsMobileLayout] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= 700 : false
+  );
+
+  useEffect(() => {
+    const updateMobileLayout = () => setIsMobileLayout(window.innerWidth <= 700);
+    updateMobileLayout();
+    window.addEventListener("resize", updateMobileLayout);
+    return () => window.removeEventListener("resize", updateMobileLayout);
+  }, []);
+
   const [profile, setProfile] = useState(BLANK_PROFILE);
   const [authUser, setAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -2357,31 +2377,45 @@ export default function GolfApp() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
-      setAuthUser(user);
-      if (user) {
-        const saved = await loadProfileFromFirestore(user.uid);
-        if (saved) {
-          // Strip liveRound out of profile state — it's managed separately
-          const { liveRound: savedLiveRound, ...savedProfile } = saved;
-          // Silently repair OVR/XP/level if they look wrong
-          const repaired = await selfRepairProfile(user.uid, savedProfile);
-          setProfile(repaired);
-          setAnimOVR(repaired.ovr);
-          if (repaired.profilePic) { const compressed = await compressImage(repaired.profilePic); setProfilePic(compressed); }
-          // Restore an in-progress or completed-but-unsaved live round
-          if (savedLiveRound) setLiveRound(savedLiveRound);
-        } else {
-          const newProfile = { ...BLANK_PROFILE, username: user.displayName || user.email.split("@")[0].toUpperCase() };
-          setProfile(newProfile);
-          setAnimOVR(50);
-          await saveProfileToFirestore(user.uid, newProfile);
+      try {
+        setAuthUser(user);
+        if (user) {
+          const saved = await loadProfileFromFirestore(user.uid);
+          if (saved) {
+            // Strip liveRound out of profile state — it's managed separately
+            const { liveRound: savedLiveRound, ...savedProfile } = saved;
+            // Silently repair OVR/XP/level if they look wrong
+            const repaired = await selfRepairProfile(user.uid, savedProfile);
+            setProfile(repaired);
+            setAnimOVR(repaired.ovr);
+            if (repaired.profilePic) { const compressed = await compressImage(repaired.profilePic); setProfilePic(compressed); }
+            // Restore an in-progress or completed-but-unsaved live round
+            if (savedLiveRound) setLiveRound(savedLiveRound);
+          } else {
+            const newProfile = { ...BLANK_PROFILE, username: user.displayName || user.email.split("@")[0].toUpperCase() };
+            setProfile(newProfile);
+            setAnimOVR(50);
+            await saveProfileToFirestore(user.uid, newProfile);
+          }
+          profileLoadedRef.current = true;
         }
-        profileLoadedRef.current = true;
+      } catch (e) {
+        console.warn("[Auth] startup failed:", e);
+      } finally {
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
     return unsub;
   }, []);
+
+  // Capacitor/iOS WebView safety: never leave the app stuck on the loading screen.
+  useEffect(() => {
+    if (!authLoading) return;
+    const id = setTimeout(() => {
+      setAuthLoading(false);
+    }, 6000);
+    return () => clearTimeout(id);
+  }, [authLoading]);
 
   const deletingRef = useRef(false);
   const profileLoadedRef = useRef(false);
@@ -2429,10 +2463,24 @@ export default function GolfApp() {
     setAuthBusy(false);
   }
   async function handleLogin() {
-    setAuthError(""); setAuthBusy(true);
-    try { await signInWithEmailAndPassword(auth, authEmail, authPassword); }
-    catch(e) { setAuthError("Invalid email or password."); }
-    setAuthBusy(false);
+    setAuthError("");
+    setAuthBusy(true);
+
+    const timeoutId = setTimeout(() => {
+      setAuthBusy(false);
+      setAuthError("Login timed out inside the iOS wrapper. Firebase network works, but SDK auth did not complete.");
+    }, 12000);
+
+    try {
+      await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      clearTimeout(timeoutId);
+      setAuthBusy(false);
+    } catch(e) {
+      clearTimeout(timeoutId);
+      console.warn("[Auth] login failed:", e);
+      setAuthError(e?.message || "Invalid email or password.");
+      setAuthBusy(false);
+    }
   }
   async function handleLogout() { await signOut(auth); setProfile(BLANK_PROFILE); setAnimOVR(50); setTab("profile"); }
   async function handleDeleteAccount() {
@@ -3078,7 +3126,7 @@ export default function GolfApp() {
 
       {/* ── PROFILE TAB ── */}
       {tab === "profile" && !liveRound && (
-        <div className="tab-scroll" style={{ paddingBottom: 80 }}>
+        <div className="tab-scroll" style={{ paddingBottom: "calc(150px + env(safe-area-inset-bottom))", overflowX: "hidden" }}>
 
           {/* ── DARK HEADER ── */}
           <div style={{ position: "relative", background: "#0f0f0f", ...bannerStyle }} className={bannerClass}>
@@ -3183,14 +3231,14 @@ export default function GolfApp() {
           )}
 
           {/* ── 3-COL STATS STRIP ── */}
-          <div style={{ display: "flex", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", width: "100%", maxWidth: "100%", background: "#fff", borderBottom: "1px solid #e5e7eb", overflow: "hidden" }}>
             {[
               { val: profile.history.length, label: "ROUNDS", color: "#111827" },
               { val: profile.history.length > 0 ? Math.min(...profile.history.map(r => r.score)) : "—", label: "BEST RND", color: "#111827" },
               { val: profile.streak > 0 ? `${profile.streak}🔥` : "—", label: "STREAK", color: "#111827" },
               { val: (profile.coins || 0).toLocaleString(), label: "🪙 COINS", color: "#d97706" },
             ].map(({ val, label, color }, i) => (
-              <div key={label} style={{ flex: 1, padding: "10px 0", textAlign: "center", borderRight: i < 3 ? "1px solid #e5e7eb" : "none" }}>
+              <div key={label} style={{ minWidth: 0, padding: "10px 0", textAlign: "center", borderRight: i < 3 ? "1px solid #e5e7eb" : "none", overflow: "hidden" }}>
                 <div style={{ fontSize: 20, fontWeight: 900, color, fontFamily: "Bebas Neue", lineHeight: 1 }}>{val}</div>
                 <div style={{ fontSize: 8, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, marginTop: 2 }}>{label}</div>
               </div>
@@ -3198,9 +3246,9 @@ export default function GolfApp() {
           </div>
 
           {/* ── TWO-COLUMN BODY: Attributes left | Last 5 right ── */}
-          <div style={{ display: "flex", background: "#fff", borderBottom: "1px solid #e5e7eb", minHeight: 240 }}>
+          <div style={{ display: isMobileLayout ? "block" : "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", background: "#fff", borderBottom: "1px solid #e5e7eb", minHeight: 240, width: "100%", maxWidth: "100%", overflow: "hidden" }}>
             {/* Left: Attributes radar */}
-            <div style={{ flex: 1, borderRight: "1px solid #e5e7eb", padding: "12px 8px 12px" }}>
+            <div style={{ minWidth: 0, borderRight: isMobileLayout ? "none" : "1px solid #e5e7eb", borderBottom: isMobileLayout ? "1px solid #e5e7eb" : "none", padding: "12px 8px 12px", overflow: "hidden" }}>
               <div style={{ fontSize: 9, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, marginBottom: 6, textAlign: "center" }}>ATTRIBUTES</div>
               <div style={{ display: "flex", justifyContent: "center" }}>
                 <RadarChart stats={stats} accent={Theme.primaryGreen} />
@@ -3212,7 +3260,7 @@ export default function GolfApp() {
             </div>
 
             {/* Right: Last 5 rounds */}
-            <div style={{ flex: 1, padding: "12px 12px" }}>
+            <div style={{ minWidth: 0, padding: "12px 12px", overflow: "hidden" }}>
               <div style={{ fontSize: 9, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, marginBottom: 8 }}>LAST 5</div>
               {profile.history.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#9ca3af", textAlign: "center", paddingTop: 40 }}>No rounds yet</div>
