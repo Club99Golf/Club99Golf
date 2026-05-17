@@ -15,6 +15,11 @@ const GCAPI_KEY = process.env.REACT_APP_GOLF_COURSE_API_KEY || "";
 const GCAPI_BASE = "https://api.golfcourseapi.com/v1";
 const GCAPI_HDRS = { "Authorization": `Key ${GCAPI_KEY}` };
 
+// Stripe coin purchases are disabled inside the iOS Capacitor wrapper.
+// App Store / TestFlight builds should use Apple IAP in a later phase.
+const IS_CAPACITOR_WRAPPER = typeof window !== "undefined" && !!window.Capacitor;
+const DISABLE_STRIPE_PURCHASES = IS_CAPACITOR_WRAPPER;
+
 /** Search GolfCourseAPI by name — returns array of course objects */
 async function searchGolfCourseAPI(query) {
   if (!GCAPI_KEY || query.length < 2) return [];
@@ -2166,6 +2171,14 @@ export default function GolfApp() {
   }, [!!liveRound]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSelectCoinPack(pack) {
+    if (DISABLE_STRIPE_PURCHASES) {
+      setCoinShopPack(null);
+      setCoinClientSecret(null);
+      setCoinPaymentSuccess(false);
+      setCoinPaymentError("Coin purchases are disabled in the iOS wrapper. App Store purchases will be added in a later IAP phase.");
+      return;
+    }
+
     setCoinShopPack(pack);
     setCoinPaymentError("");
     setCoinPaymentSuccess(false);
@@ -5828,12 +5841,17 @@ export default function GolfApp() {
               <div style={{ fontSize: 13, fontWeight: 700, color: Theme.mutedGold }}>🪙 {COINS.toLocaleString()} Coins</div>
             </div>
 
-            {/* ── COIN PACKS ── */}
-            <div style={{ marginBottom: 18 }}>
+            {/* ── COIN PACKS ── hidden in iOS wrapper until Apple IAP phase */}
+            <div style={{ marginBottom: 18, display: DISABLE_STRIPE_PURCHASES ? "none" : "block" }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, marginBottom: 8 }}>BUY COINS</div>
+              {DISABLE_STRIPE_PURCHASES && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "9px 11px", fontSize: 11, color: "#92400e", fontWeight: 700, lineHeight: 1.4, marginBottom: 10 }}>
+                  Coin purchases are disabled in the iOS wrapper. App Store purchases will be added in a later IAP phase.
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {COIN_PACKS.map(pack => (
-                  <button key={pack.id} onClick={() => handleSelectCoinPack(pack)} style={{ position: "relative", background: "#fff", border: pack.tag ? `2px solid ${Theme.primaryGreen}` : "1px solid #e5e7eb", borderRadius: 14, padding: "14px 12px", textAlign: "center", cursor: "pointer", boxShadow: pack.tag ? "0 2px 12px rgba(125,162,126,0.15)" : "none" }}>
+                  <button key={pack.id} disabled={DISABLE_STRIPE_PURCHASES} onClick={() => handleSelectCoinPack(pack)} style={{ position: "relative", background: DISABLE_STRIPE_PURCHASES ? "#f9fafb" : "#fff", opacity: DISABLE_STRIPE_PURCHASES ? 0.65 : 1, border: pack.tag ? `2px solid ${Theme.primaryGreen}` : "1px solid #e5e7eb", borderRadius: 14, padding: "14px 12px", textAlign: "center", cursor: DISABLE_STRIPE_PURCHASES ? "not-allowed" : "pointer", boxShadow: pack.tag ? "0 2px 12px rgba(125,162,126,0.15)" : "none" }}>
                     {pack.tag && <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", background: Theme.primaryGreen, color: "#fff", fontSize: 8, fontWeight: 800, letterSpacing: 1, borderRadius: 10, padding: "2px 8px", whiteSpace: "nowrap" }}>{pack.tag}</div>}
                     <div style={{ fontSize: 22, fontWeight: 900, color: Theme.mutedGold, fontFamily: "Bebas Neue", lineHeight: 1 }}>🪙 {pack.coins.toLocaleString()}</div>
                     <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{pack.label}</div>
