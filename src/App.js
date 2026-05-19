@@ -3882,6 +3882,9 @@ export default function GolfApp() {
           holeGeo?.tee ||
           liveRound?.apiCourseLocation ||
           COURSE_MAP_CENTERS[course] ||
+          // Setup fallback: for a brand-new/unplayed course with no saved pins yet,
+          // use the player's current GPS position so the map still opens and the user can drop tee/flag pins.
+          effectivePlayerPos ||
           null;
         // Privacy-safe map center:
         // Do NOT fall back to raw user GPS as the default map center.
