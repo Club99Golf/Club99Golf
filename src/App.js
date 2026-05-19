@@ -2095,11 +2095,13 @@ export default function GolfApp() {
   useEffect(() => { pinsRef.current = { teePin, flagPin }; }, [teePin, flagPin]);
 
   // ── PIN AUTO-SAVE — write to localStorage the moment both pins are confirmed ──
+  // Important: do NOT run this effect just because currentHole changes.
+  // Otherwise old hole pins can be saved under the next hole before auto-load clears/loads pins.
   useEffect(() => {
     if (!liveRound || !teePin || !flagPin) return;
     const absHole = liveRound.currentHole + (liveRound.holeOffset || 0);
     savePinLayout(liveRound.course, absHole, teePin, flagPin);
-  }, [teePin, flagPin, liveRound?.course, liveRound?.currentHole]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teePin, flagPin, liveRound?.course]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── PIN AUTO-LOAD — restore saved pins; fall back to community average ──
   // pendingFitBoundsRef is read by the Map's onLoad handler to fitBounds after tile load.
@@ -2111,14 +2113,25 @@ export default function GolfApp() {
 
     const absHole = liveRound.currentHole + (liveRound.holeOffset || 0);
     const saved = loadPinLayout(liveRound.course, absHole);
-    if (saved?.teePin) setTeePin(saved.teePin);
-    if (saved?.flagPin) setFlagPin(saved.flagPin);
+
+    // Always reset pins for the newly selected hole first.
+    // If this hole has no saved pins, it should show empty setup state — not stale pins from the previous hole.
+    setTargetPin(null);
+    setTeePinManual(false);
+    setTeePin(saved?.teePin || null);
+    setFlagPin(saved?.flagPin || null);
 
     // Async community fetch — fills any missing tee/flag pins
     const courseKey = communityPinCourseKey(liveRound);
     const holeIdx   = absHole;
     fetchCommunityPins(courseKey, holeIdx).then(community => {
+      const activeRound = liveRoundRef.current;
+      const activeAbsHole = activeRound ? activeRound.currentHole + (activeRound.holeOffset || 0) : null;
+
+      // Prevent late async community data from a previous hole from overwriting the active hole.
+      if (activeAbsHole !== holeIdx) return;
       if (!community) return;
+
       setCommunityPinCount(community.count);
       let fromCommunity = false;
       if (!saved?.teePin && community.teePin) { setTeePin(community.teePin); fromCommunity = true; }
@@ -2127,17 +2140,32 @@ export default function GolfApp() {
     });
   }, [liveRound?.course, liveRound?.currentHole]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── RESET MAP MANUAL-PAN LOCK ON HOLE CHANGE ──
+  // Each new hole should re-orient tee→flag automatically.
+  useEffect(() => {
+    if (!liveRound) return;
+    mapUserPannedRef.current = false;
+    setMapUserPanned(false);
+  }, [liveRound?.course, liveRound?.currentHole]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── AUTO-BEARING — rotate map so the flag is always at the top ──
   // Uses tee→flag bearing so orientation is stable regardless of player position.
   useEffect(() => {
     if (!liveRound || !mapRef.current) return;
-    const hg = COURSE_DB[liveRound.course]?.holes?.[liveRound.currentHole + (liveRound.holeOffset || 0)];
-    const target = flagPin || hg?.green?.center || hg?.green?.front || null;
-    if (!target) return;
+
+    const absHole = liveRound.currentHole + (liveRound.holeOffset || 0);
+    const hg = COURSE_DB[liveRound.course]?.holes?.[absHole];
+
+    const target = flagPin || hg?.green?.center || hg?.green?.front || hg?.green?.back || null;
     const origin = teePin || hg?.tee || null;
-    if (!origin) return;
+
+    if (!target || !origin) return;
+
     const brng = bearingDeg(origin.lat, origin.lng, target.lat, target.lng);
-    try { if (!mapUserPannedRef.current) mapRef.current.rotateTo(brng, { duration: 600 }); } catch (_) {}
+
+    try {
+      mapRef.current.rotateTo(brng, { duration: 600 });
+    } catch (_) {}
   }, [flagPin?.lat, flagPin?.lng, teePin?.lat, teePin?.lng, liveRound?.course, liveRound?.currentHole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── HOLE GEOFENCING — auto-advance hole when player is near green and moving fast ──
@@ -4449,7 +4477,15 @@ export default function GolfApp() {
                   <span style={{ fontSize: 6, fontFamily: "Bebas Neue", color: teePin ? "#fff" : "rgba(255,255,255,0.45)", letterSpacing: 0.8 }}>{teePin ? "CLEAR" : "TEE"}</span>
                 </button>
                 <button
-                  onClick={() => { if (flagPin) { if (window.confirm("Remove flag pin?")) { setFlagPin(null); setTargetPin(null); setCommunityPinSource(false); } } else setPlacingMode("flag"); }}
+                  onClick={() => {
+                          if (flagPin) {
+                            setFlagPin(null);
+                            setTargetPin(null);
+                            setCommunityPinSource(false);
+                          } else {
+                            setPlacingMode("flag");
+                          }
+                        }}
                   style={{ width: 40, height: 40, borderRadius: 10, background: flagPin ? "rgba(220,38,38,0.85)" : "rgba(0,0,0,0.65)", border: `1.5px solid ${flagPin ? "rgba(220,38,38,0.9)" : "rgba(255,255,255,0.15)"}`, backdropFilter: "blur(10px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", gap: 1 }}
                 >
                   <svg width="14" height="20" viewBox="0 0 24 38" fill="none">
