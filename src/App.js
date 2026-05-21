@@ -3929,6 +3929,22 @@ export default function GolfApp() {
           ? haversineYards(effectivePlayerPos.lat, effectivePlayerPos.lng, _courseRef.lat, _courseRef.lng)
           : null;
         const onCourse = distFromCourse != null && distFromCourse < 500;
+
+        // Show the player marker only when the player is actually near the course/hole.
+        // Exception: if the course has no API center, no saved pins, and no known geometry,
+        // allow GPS as a setup fallback so a player physically at the course can drop pins.
+        const usingGpsSetupFallback =
+          !!effectivePlayerPos &&
+          !pinCenter &&
+          !holeGeo?.green?.center &&
+          !holeGeo?.green?.front &&
+          !holeGeo?.green?.back &&
+          !holeGeo?.tee &&
+          !liveRound?.apiCourseLocation &&
+          !COURSE_MAP_CENTERS[course];
+
+        const showPlayerMarker = !!effectivePlayerPos && (onCourse || usingGpsSetupFallback);
+
         // On course: live GPS-to-flag. Off course: static tee-to-flag (or GPS if no tee).
         let pinYards = effectiveFlag
           ? (onCourse && effectivePlayerPos
@@ -4220,7 +4236,7 @@ export default function GolfApp() {
                         );
                       })()}
                       {/* Player marker — green dot */}
-                      {effectivePlayerPos && (
+                      {showPlayerMarker && (
                         <Marker longitude={effectivePlayerPos.lng} latitude={effectivePlayerPos.lat} anchor="center" pitchAlignment="viewport" rotationAlignment="viewport" style={{ pointerEvents: placingMode ? "none" : "auto" }}>
                           <div style={{ position: "relative", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center" }}>
                             <div className="stroke-marker-halo" style={{ position: "absolute", width: 24, height: 24, borderRadius: "50%", background: "rgba(125,162,126,0.15)", border: "1px solid rgba(125,162,126,0.85)" }} />
