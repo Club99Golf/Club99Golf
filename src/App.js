@@ -3122,7 +3122,7 @@ export default function GolfApp() {
         <button
           onClick={authMode === "login" ? handleLogin : handleSignup}
           disabled={authBusy}
-          style={{ width: "100%", padding: "15px 0", background: "#22c55e", border: "none", borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 900, letterSpacing: 2, cursor: authBusy ? "default" : "pointer", fontFamily: "'Inter','DM Sans',sans-serif", opacity: authBusy ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", textTransform: "uppercase" }}
+          style={{ width: "100%", padding: "15px 0", background: Theme.primaryGreen, border: "none", borderRadius: 12, color: "#fff", fontSize: 13, fontWeight: 900, letterSpacing: 2, cursor: authBusy ? "default" : "pointer", fontFamily: "'Inter','DM Sans',sans-serif", opacity: authBusy ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", textTransform: "uppercase" }}
         >
           {authBusy ? "…" : authMode === "login" ? "Sign In" : "Create Account"}
         </button>
