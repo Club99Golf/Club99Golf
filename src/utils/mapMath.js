@@ -1,6 +1,7 @@
 export function hapticTap() { try { navigator.vibrate && navigator.vibrate(10); } catch (_) {} }
 
 // Stable unique ID generator for Mapbox Source/Layer pairs
+let _mlId = 0;
 
 export function mkId(prefix) { return `${prefix}-${++_mlId}`; }
 

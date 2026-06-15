@@ -1,6 +1,7 @@
 export default function ShopTab(props) {
   const { ACCENT, COINS, COIN_PACKS, DISABLE_STRIPE_PURCHASES, S, SHOP_ITEMS, Theme, attrToast, authUser, coinClientSecret, coinPaymentBusy, coinPaymentError, coinPaymentSuccess, coinShopPack, db, doc, equippedBanner, handleCoinPayment, handleCreateCourse, handleSelectCoinPack, liveAttrGains, liveRound, mountCardElement, newCourseForm, pendingShotYards, profile, profilePic, roundSubmittedRef, setCoinClientSecret, setCoinPaymentError, setCoinPaymentSuccess, setCoinShopPack, setDoc, setLiveRound, setLiveStrokesArr, setNewCourseForm, setPendingShotEndPos, setPendingShotYards, setProfile, setShopCategory, setShopConfirm, setShopPreview, setShotInFairway, setShowCreateCourse, shopCategory, shopConfirm, shopPreview, shotInFairway, showCreateCourse, tab, updateClubAverage, username } = props;
   return (
+    <>
         <div className="tab-scroll" style={{ paddingBottom: 80 }}>
           <div style={{ padding: "20px 16px 12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -256,7 +257,6 @@ export default function ShopTab(props) {
             </div>
           )}
         </div>
-      )}
 
       {/* ── CLUB PICKER MODAL (shot tracking) ── */}
       {pendingShotYards != null && (
@@ -449,5 +449,7 @@ export default function ShopTab(props) {
             </div>
           </div>
         </div>
+      )}
+    </>
   );
 }

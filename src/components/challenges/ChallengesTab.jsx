@@ -374,8 +374,7 @@ export default function ChallengesTab(props) {
             </div>
           );
         })()}
-        </>
-      )}
+      
 
       {/* ── Challenger Profile Modal ── */}
       {viewingChallenger && (
@@ -509,5 +508,7 @@ export default function ChallengesTab(props) {
             )}
           </div>
         </div>
+      )}
+    </>
   );
 }

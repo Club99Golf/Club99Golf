@@ -1712,6 +1712,7 @@ export default function GolfApp() {
     stats,
     submitChallengeReview,
     submitLiveRound,
+    submitRound: submitLiveRound,
     suggestClub,
     tab,
     targetPin,
@@ -1768,4 +1769,3 @@ export default function GolfApp() {
     </div>
   );
 }
-

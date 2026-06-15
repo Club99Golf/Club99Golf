@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { Theme } from "../../Theme";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { db } from "../../config/firebase";
+import { CHALLENGE_FORMATS } from "../../config/constants";
 import { formatChallengeDate } from "../../services/challengeService";
 
 export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, onJoin, onDelete, onSettle, onReview, onStartRound, onViewProfile }) {

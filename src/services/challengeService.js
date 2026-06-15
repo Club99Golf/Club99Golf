@@ -19,6 +19,7 @@ import {
 import { db } from "../config/firebase";
 import { sanitizeForFirestore, repairProfile, sanitizeBagDistances } from "../utils/firestoreUtils";
 import { DEFAULT_BAG } from "../data/defaultBag";
+import { CHALLENGE_FORMATS } from "../config/constants";
 export async function loadChallenges() {
   try {
     const snap = await getDocs(collection(db, "challenges"));
