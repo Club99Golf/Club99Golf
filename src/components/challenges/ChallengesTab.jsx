@@ -1,5 +1,63 @@
 export default function ChallengesTab(props) {
-  const { ACCENT, BadgeIcon, CHALLENGE_FORMATS, COURSE_DB, ChallengeCard, S, Theme, authUser, challengeBusy, challengeCourseSuggestions, challengeForm, challengePostError, challengeStep, challengerStats, challenges, challengesLoading, collection, db, deleteChallengeInDb, doc, friends, getDoc, getDocs, getUnlockedBadges, handlePostChallenge, handleSendRequest, joinChallengeInDb, profile, profilePic, query, removeFriendInDb, searchGolfCourseAPI, sentRequests, setActiveChallengeId, setChallengeCourseSuggestions, setChallengeForm, setChallengePostError, setChallengeStep, setChallengerStats, setChallenges, setFriends, setLeaderboard, setProfile, setShowChallengeModal, setTab, setViewingChallenger, setViewingPic, setViewingProfile, settleChallengeInDb, showChallengeModal, startLiveRound, submitChallengeReview, tab, username, viewingChallenger, viewingPic, viewingProfile, where } = props;
+  const {
+    ACCENT,
+    BadgeIcon,
+    CHALLENGE_FORMATS,
+    COURSE_DB,
+    ChallengeCard,
+    S,
+    Theme,
+    authUser,
+    challengeBusy,
+    challengeCourseSuggestions,
+    challengeForm,
+    challengePostError,
+    challengeStep,
+    challengerStats,
+    challenges,
+    challengesLoading,
+    collection,
+    db,
+    deleteChallengeInDb,
+    doc,
+    friends,
+    getDoc,
+    getDocs,
+    getUnlockedBadges,
+    handlePostChallenge,
+    handleSendRequest,
+    joinChallengeInDb,
+    joinableChallenge,
+    profile,
+    profilePic,
+    query,
+    removeFriendInDb,
+    searchGolfCourseAPI,
+    sentRequests,
+    setActiveChallengeId,
+    setChallengeCourseSuggestions,
+    setChallengeForm,
+    setChallengePostError,
+    setChallengeStep,
+    setChallengerStats,
+    setChallenges,
+    setFriends,
+    setLeaderboard,
+    setProfile,
+    setShowChallengeModal,
+    setTab,
+    setViewingChallenger,
+    setViewingPic,
+    setViewingProfile,
+    settleChallengeInDb,
+    showChallengeModal,
+    startLiveRound,
+    submitChallengeReview,
+    viewingChallenger,
+    viewingPic,
+    viewingProfile,
+    where,
+  } = props;
   return (
         <>
         <div className="tab-scroll" style={{ paddingBottom: 80 }}>
@@ -18,6 +76,64 @@ export default function ChallengesTab(props) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Post New Challenge
             </button>
+            {joinableChallenge && (
+              <div
+                style={{
+                  background: "rgba(125,162,126,0.12)",
+                  border: `1.5px solid ${Theme.primaryGreen}`,
+                  borderRadius: 14,
+                  padding: "12px 14px",
+                  marginBottom: 16,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: "#111827" }}>
+                    Live round ready
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#6b7280",
+                      marginTop: 2,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {joinableChallenge.course} is ready to play.
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setActiveChallengeId(joinableChallenge.id);
+                    startLiveRound(
+                      joinableChallenge.course,
+                      joinableChallenge.teeColor || "white",
+                      String(joinableChallenge.holes || 18),
+                      { nineSide: joinableChallenge.nineHolesSide || "front" }
+                    );
+                    setTab("live");
+                  }}
+                  style={{
+                    padding: "10px 13px",
+                    background: Theme.primaryGreen,
+                    border: "none",
+                    borderRadius: 10,
+                    color: "#fff",
+                    fontWeight: 800,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Join Round
+                </button>
+              </div>
+            )}
           </div>
           {challengesLoading ? (
             <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
@@ -34,10 +150,37 @@ export default function ChallengesTab(props) {
               {challenges.filter(c => !c.settled).map(c => (
                 <ChallengeCard key={c.id} challenge={c} myUid={authUser?.uid} myUsername={profile.username} myCoins={profile.coins || 0}
                   onJoin={async (id, wager) => {
-                    if (wager > 0) setProfile(p => ({ ...p, coins: Math.max(0, (p.coins || 0) - wager) }));
-                    const ok = await joinChallengeInDb(challenge.id, authUser.uid, profile.username, profile.ovr, profile.profilePic || null);
-                    if (ok) setChallenges(prev => prev.map(ch => ch.id === id ? { ...ch, joinedBy: [...(ch.joinedBy || []), { uid: authUser.uid, username: profile.username, ovr: profile.ovr || 0 }] } : ch));
-                    else if (wager > 0) setProfile(p => ({ ...p, coins: (p.coins || 0) + wager }));
+                    const ok = await joinChallengeInDb(
+                      id,
+                      authUser.uid,
+                      profile.username,
+                      profile.ovr,
+                      profile.profilePic || profilePic || null
+                    );
+
+                    if (ok) {
+                      setChallenges(prev =>
+                        prev.map(ch =>
+                          ch.id === id
+                            ? {
+                                ...ch,
+                                joinedBy: [
+                                  ...(ch.joinedBy || []),
+                                  {
+                                    uid: authUser.uid,
+                                    username: profile.username,
+                                    ovr: profile.ovr || 0,
+                                    profilePic: profile.profilePic || profilePic || null,
+                                    paid: wager > 0,
+                                  },
+                                ],
+                                pot: Number(ch.pot || 0) + Number(wager || 0),
+                                status: "active",
+                              }
+                            : ch
+                        )
+                      );
+                    }
                   }}
                   onDelete={async (id, wager, joinedCount) => {
                     setChallenges(prev => prev.filter(ch => ch.id !== id));
@@ -46,9 +189,37 @@ export default function ChallengesTab(props) {
                   }}
                   onSettle={async (id, winner, wager) => {
                     const ok = await settleChallengeInDb(id, winner, wager);
+
                     if (ok) {
-                      setChallenges(prev => prev.map(ch => ch.id === id ? { ...ch, settled: true, winner } : ch));
-                      if (winner.uid === authUser.uid) setProfile(p => ({ ...p, coins: (p.coins || 0) + wager * 2 }));
+                      const matchedChallenge = challenges.find(ch => ch.id === id);
+                      const payoutAmount =
+                        Number(matchedChallenge?.pot || 0) ||
+                        Number(wager || matchedChallenge?.wager || 0) *
+                          (1 + (matchedChallenge?.joinedBy || []).length);
+
+                      setChallenges(prev =>
+                        prev.map(ch =>
+                          ch.id === id
+                            ? {
+                                ...ch,
+                                settled: true,
+                                paidOut: true,
+                                status: "completed",
+                                winner,
+                                winnerUid: winner.uid,
+                                winnerUsername: winner.username,
+                                payoutAmount,
+                              }
+                            : ch
+                        )
+                      );
+
+                      if (winner.uid === authUser.uid) {
+                        setProfile(p => ({
+                          ...p,
+                          coins: Number(p.coins || 0) + payoutAmount,
+                        }));
+                      }
                     }
                   }}
                   onReview={async (id, reviewerUid, review) => {

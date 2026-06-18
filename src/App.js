@@ -125,6 +125,7 @@ export default function GolfApp() {
   const [globalLeaderboard, setGlobalLeaderboard] = useState([]);
   const [expandedCrewUid, setExpandedCrewUid] = useState(null);
   const [challenges, setChallenges] = useState([]);
+  const [joinableChallenge, setJoinableChallenge] = useState(null);
   const [challengesLoading, setChallengesLoading] = useState(false);
   const [showChallengeModal, setShowChallengeModal] = useState(false);
   const [challengeStep, setChallengeStep] = useState(1);
@@ -229,6 +230,93 @@ export default function GolfApp() {
   const [editHoleScores, setEditHoleScores] = useState([]);
   const [editHolePars, setEditHolePars] = useState([]);
 
+
+  useEffect(() => {
+    if (!authUser?.uid) {
+      setChallenges([]);
+      setJoinableChallenge(null);
+      return undefined;
+    }
+
+    setChallengesLoading(true);
+
+    const sortChallenges = items =>
+      items.sort((a, b) =>
+        (a.date + a.timeWindow) > (b.date + b.timeWindow) ? 1 : -1
+      );
+
+    const unsubscribe = onSnapshot(
+      collection(db, "challenges"),
+      snap => {
+        const now = new Date();
+
+        const items = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(challenge => {
+            if (challenge.status === "expired") return false;
+            const expiresAt = challenge.expiresAt?.toDate
+              ? challenge.expiresAt.toDate()
+              : challenge.expiresAt
+                ? new Date(challenge.expiresAt)
+                : null;
+
+            return !(
+              expiresAt &&
+              expiresAt <= now &&
+              challenge.status !== "completed" &&
+              !challenge.settled
+            );
+          });
+
+        setChallenges(sortChallenges(items));
+        setChallengesLoading(false);
+      },
+      error => {
+        console.error("Challenge listener failed:", error);
+        loadChallenges().then(items => {
+          setChallenges(items);
+          setChallengesLoading(false);
+        });
+      }
+    );
+
+    return unsubscribe;
+  }, [authUser?.uid]);
+
+  useEffect(() => {
+    if (!authUser?.uid || !Array.isArray(challenges)) {
+      setJoinableChallenge(null);
+      return;
+    }
+
+    const availableChallenge = challenges.find(challenge => {
+      const joinedBy = challenge.joinedBy || [];
+      const scores = challenge.scores || {};
+
+      const isCreator = challenge.uid === authUser.uid;
+      const isJoinedPlayer = joinedBy.some(player => player.uid === authUser.uid);
+      const isParticipant = isCreator || isJoinedPlayer;
+
+      if (!isParticipant) return false;
+      if (scores[authUser.uid] != null) return false;
+
+      const isFinished =
+        challenge.settled ||
+        challenge.paidOut ||
+        challenge.status === "completed" ||
+        challenge.status === "expired";
+
+      if (isFinished) return false;
+
+      const hasAnotherPlayer = joinedBy.length > 0;
+      const lobbyIsFull = 1 + joinedBy.length >= Number(challenge.maxPlayers || 2);
+
+      return hasAnotherPlayer || lobbyIsFull;
+    });
+
+    setJoinableChallenge(availableChallenge || null);
+  }, [authUser?.uid, challenges]);
+
   useEffect(() => {
     if (tab === "leaderboard" && authUser) {
       setLeaderboardLoading(true);
@@ -239,13 +327,6 @@ export default function GolfApp() {
         setLeaderboard(crew);
         setLeaderboardLoading(false);
       }).catch(() => setLeaderboardLoading(false));
-    }
-    if (tab === "challenges" && authUser) {
-      setChallengesLoading(true);
-      loadChallenges().then(items => {
-        setChallenges(items);
-        setChallengesLoading(false);
-      });
     }
     if (authUser && profile.history && profile.history.length > 0) {
       // Check if own rounds have new reactions since last seen
@@ -595,29 +676,41 @@ export default function GolfApp() {
 
   async function handlePostChallenge() {
     if (!authUser || challengeBusy) return;
+
     setChallengePostError("");
+
     if (!challengeForm.courseName) {
       setChallengePostError("Please select a course from the suggestions list.");
       return;
     }
+
     if (!challengeForm.date || !challengeForm.timeFrom || !challengeForm.timeTo) {
       setChallengePostError("Please fill in the date and tee time window.");
       return;
     }
+
     setChallengeBusy(true);
-    const fmt = t => { const [h, m] = t.split(":"); const hr = parseInt(h); return `${hr % 12 || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`; };
+
+    const fmt = t => {
+      const [h, m] = t.split(":");
+      const hr = parseInt(h);
+      return `${hr % 12 || 12}:${m} ${hr >= 12 ? "PM" : "AM"}`;
+    };
+
     const timeWindow = `${fmt(challengeForm.timeFrom)} – ${fmt(challengeForm.timeTo)}`;
     const tempId = `temp_${Date.now()}`;
+    const wager = challengeForm.wager ? parseInt(challengeForm.wager) : 0;
+
     const newChallenge = {
       uid: authUser.uid,
       username: profile.username,
-      profilePic: profilePic || null,
+      profilePic: profile.profilePic || profilePic || null,
       ovr: profile.ovr || 0,
       course: challengeForm.courseName,
       date: challengeForm.date,
       timeWindow,
       message: challengeForm.message.trim(),
-      wager: challengeForm.wager ? parseInt(challengeForm.wager) : 0,
+      wager,
       format: challengeForm.format,
       maxPlayers: challengeForm.playerCount,
       teamAssignments: challengeForm.slots,
@@ -625,23 +718,33 @@ export default function GolfApp() {
       holes: challengeForm.holes,
       nineHolesSide: challengeForm.holes === 9 ? challengeForm.nineHolesSide : null,
       joinedBy: [],
+      creatorPaid: false,
+      pot: 0,
+      status: "open",
+      settled: false,
+      paidOut: false,
       createdAt: new Date(),
       id: tempId,
     };
-    // Deduct wager from owner's coins immediately
-    if (newChallenge.wager > 0) setProfile(p => ({ ...p, coins: Math.max(0, (p.coins || 0) - newChallenge.wager) }));
-    // Optimistic update: prepend immediately, then sort chronologically
-    setChallenges(prev => [newChallenge, ...prev].sort((a, b) => (a.date + a.timeWindow) > (b.date + b.timeWindow) ? 1 : -1));
+
+    // Do NOT deduct coins here. Coins are deducted when another player accepts/joins.
+    setChallenges(prev =>
+      [newChallenge, ...prev].sort((a, b) =>
+        (a.date + a.timeWindow) > (b.date + b.timeWindow) ? 1 : -1
+      )
+    );
+
     setShowChallengeModal(false);
     setChallengeForm({ courseQuery: "", courseName: "", date: "", timeFrom: "", timeTo: "", message: "", wager: "", format: "stroke", playerCount: 2, slots: ["A", "B"], teeColor: "white", holes: 18, nineHolesSide: "front" });
     setChallengeCourseSuggestions([]);
+
     console.log("Posting challenge:", newChallenge);
+
     try {
-      // Strip base64 profilePic from the Firestore write — store the synced URL from profile instead
       const firestoreDoc = {
         uid: newChallenge.uid,
         username: newChallenge.username,
-        profilePic: profile.profilePic || null,
+        profilePic: profile.profilePic || profilePic || null,
         ovr: newChallenge.ovr,
         course: newChallenge.course,
         date: newChallenge.date,
@@ -655,17 +758,25 @@ export default function GolfApp() {
         holes: newChallenge.holes,
         nineHolesSide: newChallenge.nineHolesSide,
         joinedBy: [],
+        creatorPaid: false,
+        pot: 0,
+        status: "open",
+        settled: false,
+        paidOut: false,
         createdAt: serverTimestamp(),
       };
+
       const ref = await addDoc(collection(db, "challenges"), firestoreDoc);
-      // Swap temp id for real Firestore id
-      setChallenges(prev => prev.map(c => c.id === tempId ? { ...c, id: ref.id } : c));
+
+      setChallenges(prev =>
+        prev.map(c => c.id === tempId ? { ...c, id: ref.id } : c)
+      );
     } catch (e) {
       console.error("Failed to sync challenge to Firestore:", e);
-      // Card stays visible locally — just flag the sync failure
       const code = e?.code || e?.message || "unknown";
       setChallengePostError(`Saved locally but not synced (${code}). It will disappear on refresh.`);
     }
+
     setChallengeBusy(false);
   }
 
@@ -1104,9 +1215,19 @@ export default function GolfApp() {
           if (!result) return;
           const updatedScores = { ...(matchingChallenge.scores || {}), [authUser.uid]: s };
           if (result.settled) {
-            setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? { ...ch, settled: true, winner: result.winner, scores: updatedScores } : ch));
-            if (result.winner?.uid === authUser.uid && result.wager > 0)
-              setProfile(p => ({ ...p, coins: (p.coins || 0) + result.wager * 2 }));
+            setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? {
+              ...ch,
+              settled: true,
+              paidOut: true,
+              status: "completed",
+              winner: result.winner,
+              winnerUid: result.winner?.uid,
+              winnerUsername: result.winner?.username,
+              payoutAmount: result.payout || result.wager || 0,
+              scores: updatedScores,
+            } : ch));
+            if (result.winner?.uid === authUser.uid && (result.payout || result.wager) > 0)
+              setProfile(p => ({ ...p, coins: (p.coins || 0) + Number(result.payout || result.wager || 0) }));
           } else {
             setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? { ...ch, scores: updatedScores } : ch));
           }
@@ -1284,9 +1405,19 @@ export default function GolfApp() {
           if (!result) return;
           const updatedScores = { ...(matchingChallenge.scores || {}), [authUser.uid]: s };
           if (result.settled) {
-            setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? { ...ch, settled: true, winner: result.winner, scores: updatedScores } : ch));
-            if (result.winner?.uid === authUser.uid && result.wager > 0)
-              setProfile(p => ({ ...p, coins: (p.coins || 0) + result.wager * 2 }));
+            setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? {
+              ...ch,
+              settled: true,
+              paidOut: true,
+              status: "completed",
+              winner: result.winner,
+              winnerUid: result.winner?.uid,
+              winnerUsername: result.winner?.username,
+              payoutAmount: result.payout || result.wager || 0,
+              scores: updatedScores,
+            } : ch));
+            if (result.winner?.uid === authUser.uid && (result.payout || result.wager) > 0)
+              setProfile(p => ({ ...p, coins: (p.coins || 0) + Number(result.payout || result.wager || 0) }));
           } else {
             setChallenges(prev => prev.map(ch => ch.id === matchingChallenge.id ? { ...ch, scores: updatedScores } : ch));
           }
@@ -1487,6 +1618,7 @@ export default function GolfApp() {
     challengeStep,
     challengerStats,
     challenges,
+    joinableChallenge,
     challengesLoading,
     coinClientSecret,
     coinPaymentBusy,
@@ -1769,3 +1901,4 @@ export default function GolfApp() {
     </div>
   );
 }
+

@@ -26,8 +26,39 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
   const fmt = CHALLENGE_FORMATS.find(f => f.id === challenge.format) || CHALLENGE_FORMATS[0];
   const canAffordJoin = myCoins >= wager;
   const myReview = (challenge.reviews || {})[myUid];
+
+  const getChallengeProfilePic = player => {
+    return (
+      player?.profilePic ||
+      player?.creatorProfilePic ||
+      player?.photoURL ||
+      player?.avatarUrl ||
+      player?.profileImage ||
+      player?.image ||
+      null
+    );
+  };
+
+  const creatorPlayer = {
+    uid: challenge.uid,
+    username: challenge.username,
+    ovr: challenge.ovr,
+    profilePic: challenge.profilePic || challenge.creatorProfilePic || null,
+    isOwner: true,
+  };
+
+  const allPlayers = [
+    creatorPlayer,
+    ...(challenge.joinedBy || []).map(u => ({ ...u, isOwner: false })),
+  ];
+
+  const payoutAmount =
+    Number(challenge.payoutAmount || 0) ||
+    Number(challenge.pot || 0) ||
+    Number(wager || 0) * allPlayers.length;
+
   // For 1v1 the opponent is one person; for group formats it's all other participants
-  const opponent = isOwn ? (challenge.joinedBy || [])[0] : { uid: challenge.uid, username: challenge.username };
+  const opponent = isOwn ? (challenge.joinedBy || [])[0] : creatorPlayer;
 
   async function handleConfirmJoin() {
     if (wager > 0 && !canAffordJoin) { setJoinError(`You need ${wager.toLocaleString()} coins to join this wager.`); return; }
@@ -72,13 +103,13 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
         {/* ── Header: avatar + username / OVR badge ── */}
         <div style={{ padding: "16px 16px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button onClick={() => onViewProfile?.({ uid: challenge.uid, username: challenge.username, profilePic: challenge.profilePic, ovr: challenge.ovr })} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: 46, height: 46, borderRadius: "50%", background: "#f3f4f6", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid rgba(125,162,126,0.22)" }}>
-              {challenge.profilePic
-                ? <img src={challenge.profilePic} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+            <button onClick={() => onViewProfile?.({ uid: challenge.uid, username: challenge.username, profilePic: getChallengeProfilePic(creatorPlayer), ovr: challenge.ovr })} style={{ border: "2px solid rgba(125,162,126,0.22)", padding: 0, cursor: "pointer", width: 46, height: 46, borderRadius: "50%", background: "#f3f4f6", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {getChallengeProfilePic(creatorPlayer)
+                ? <img src={getChallengeProfilePic(creatorPlayer)} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
                 : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>}
             </button>
             <div>
-              <button onClick={() => onViewProfile?.({ uid: challenge.uid, username: challenge.username, profilePic: challenge.profilePic, ovr: challenge.ovr })} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 16, fontWeight: 900, fontFamily: "Bebas Neue", letterSpacing: 1.2, color: "#111827", lineHeight: 1.1 }}>{challenge.username}</button>
+              <button onClick={() => onViewProfile?.({ uid: challenge.uid, username: challenge.username, profilePic: getChallengeProfilePic(creatorPlayer), ovr: challenge.ovr })} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 16, fontWeight: 900, fontFamily: "Bebas Neue", letterSpacing: 1.2, color: "#111827", lineHeight: 1.1 }}>{challenge.username}</button>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
                 <span style={{ fontSize: 10, fontWeight: 800, color: Theme.primaryGreen, background: "rgba(125,162,126,0.1)", borderRadius: 6, padding: "2px 7px", letterSpacing: 0.5 }}>{fmt.label}</span>
                 <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 600 }}>{joinedCount + 1}/{maxPlayers} joined</span>
@@ -117,22 +148,24 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
           ) : null}
           {/* Roster — all participants with OVR */}
           {(() => {
-            const allPlayers = [
-              { uid: challenge.uid, username: challenge.username, ovr: challenge.ovr, isOwner: true },
-              ...(challenge.joinedBy || []).map(u => ({ ...u, isOwner: false })),
-            ];
             const slots = maxPlayers - allPlayers.length;
             return (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 2 }}>
-                {allPlayers.map(p => (
-                  <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: 5, background: p.isOwner ? "rgba(125,162,126,0.08)" : "#f3f4f6", border: p.isOwner ? "1px solid rgba(125,162,126,0.25)" : "1px solid #e5e7eb", borderRadius: 20, padding: "4px 10px 4px 6px" }}>
-                    <div style={{ background: Theme.primaryGreen, borderRadius: "50%", width: 18, height: 18, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", fontFamily: "Bebas Neue", letterSpacing: 0.3 }}>{p.ovr || "—"}</span>
+                {allPlayers.map(p => {
+                  const pic = getChallengeProfilePic(p);
+                  return (
+                    <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: 5, background: p.isOwner ? "rgba(125,162,126,0.08)" : "#f3f4f6", border: p.isOwner ? "1px solid rgba(125,162,126,0.25)" : "1px solid #e5e7eb", borderRadius: 20, padding: "4px 10px 4px 6px" }}>
+                      <div style={{ background: pic ? "#f3f4f6" : Theme.primaryGreen, borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+                        {pic
+                          ? <img src={pic} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                          : <span style={{ fontSize: 9, fontWeight: 900, color: "#fff", fontFamily: "Bebas Neue", letterSpacing: 0.3 }}>{p.ovr || "—"}</span>}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>{p.username}</span>
+                      {p.isOwner && <span style={{ fontSize: 9, color: Theme.primaryGreen, fontWeight: 800 }}>HOST</span>}
+                      <span style={{ fontSize: 9, color: "#9ca3af", fontWeight: 800 }}>{p.ovr || "—"} OVR</span>
                     </div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#374151" }}>{p.username}</span>
-                    {p.isOwner && <span style={{ fontSize: 9, color: Theme.primaryGreen, fontWeight: 800 }}>HOST</span>}
-                  </div>
-                ))}
+                  );
+                })}
                 {Array.from({ length: slots }).map((_, i) => (
                   <div key={`open-${i}`} style={{ display: "flex", alignItems: "center", gap: 5, background: "#fafafa", border: "1px dashed #d1d5db", borderRadius: 20, padding: "4px 10px 4px 6px" }}>
                     <div style={{ width: 18, height: 18, borderRadius: "50%", border: "1.5px dashed #d1d5db", flexShrink: 0 }} />
@@ -151,7 +184,7 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 0", background: "rgba(234,179,8,0.08)", border: "1.5px solid rgba(234,179,8,0.3)", borderRadius: 12 }}>
                 <span style={{ fontSize: 18 }}>🏆</span>
                 <div>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: "#b45309" }}>{challenge.winner?.username} won{wager > 0 ? ` · 🪙 ${(wager * 2).toLocaleString()} coins` : ""}!</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: "#b45309" }}>{challenge.winner?.username} won{payoutAmount > 0 ? ` · 🪙 ${payoutAmount.toLocaleString()} coins` : ""}!</span>
                   {challenge.scores && (() => {
                     const participants = [{ uid: challenge.uid, username: challenge.username }, ...(challenge.joinedBy || [])];
                     return (
@@ -251,7 +284,7 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
                     settleTarget ? (
                       <div style={{ background: "#f9fafb", borderRadius: 12, padding: "14px", marginTop: 4 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 10, textAlign: "center" }}>
-                          Award <strong style={{ color: "#b45309" }}>🪙 {(wager * 2).toLocaleString()} coins</strong> to {settleTarget.username}?
+                          Award <strong style={{ color: "#b45309" }}>🪙 {payoutAmount.toLocaleString()} coins</strong> to {settleTarget.username}?
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => setSettleTarget(null)} style={{ flex: 1, padding: "10px 0", background: "#f3f4f6", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "#374151", cursor: "pointer" }}>Cancel</button>
@@ -262,7 +295,7 @@ export default function ChallengeCard({ challenge, myUid, myUsername, myCoins, o
                       <div style={{ marginTop: 4 }}>
                         <div style={{ fontSize: 10, fontWeight: 800, color: "#9ca3af", letterSpacing: 1.5, textAlign: "center", marginBottom: 7 }}>DECLARE WINNER</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          <button onClick={() => setSettleTarget({ uid: challenge.uid, username: challenge.username })} style={{ flex: "1 1 calc(50% - 4px)", padding: "10px 6px", background: "rgba(234,179,8,0.1)", border: "1.5px solid rgba(234,179,8,0.35)", borderRadius: 10, fontSize: 12, fontWeight: 800, color: "#b45309", cursor: "pointer" }}>🏆 I Won</button>
+                          <button onClick={() => setSettleTarget({ uid: challenge.uid, username: challenge.username, profilePic: getChallengeProfilePic(creatorPlayer) })} style={{ flex: "1 1 calc(50% - 4px)", padding: "10px 6px", background: "rgba(234,179,8,0.1)", border: "1.5px solid rgba(234,179,8,0.35)", borderRadius: 10, fontSize: 12, fontWeight: 800, color: "#b45309", cursor: "pointer" }}>🏆 I Won</button>
                           {(challenge.joinedBy || []).map(u => (
                             <button key={u.uid} onClick={() => setSettleTarget(u)} style={{ flex: "1 1 calc(50% - 4px)", padding: "10px 6px", background: "rgba(234,179,8,0.1)", border: "1.5px solid rgba(234,179,8,0.35)", borderRadius: 10, fontSize: 12, fontWeight: 800, color: "#b45309", cursor: "pointer" }}>🏆 {u.username} Won</button>
                           ))}

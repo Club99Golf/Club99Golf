@@ -7,7 +7,6 @@ import {
   runTransaction,
   updateDoc,
 } from "firebase/firestore";
-
 import { db } from "../config/firebase";
 import { CHALLENGE_FORMATS } from "../config/constants";
 
@@ -15,25 +14,52 @@ export async function loadChallenges() {
   try {
     const snap = await getDocs(collection(db, "challenges"));
 
-    return snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) =>
-        (a.date + a.timeWindow) > (b.date + b.timeWindow) ? 1 : -1
-      );
-  } catch {
+    const challenges = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
+    const now = new Date();
+    const activeChallenges = [];
+
+    for (const challenge of challenges) {
+      const expiresAt = challenge.expiresAt?.toDate
+        ? challenge.expiresAt.toDate()
+        : challenge.expiresAt
+          ? new Date(challenge.expiresAt)
+          : null;
+
+      const isExpired =
+        expiresAt &&
+        expiresAt <= now &&
+        challenge.status !== "completed" &&
+        challenge.status !== "expired" &&
+        !challenge.settled;
+
+      if (isExpired) {
+        await updateDoc(doc(db, "challenges", challenge.id), {
+          status: "expired",
+          expiredAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        continue;
+      }
+
+      if (challenge.status !== "expired") {
+        activeChallenges.push(challenge);
+      }
+    }
+
+    return activeChallenges.sort((a, b) =>
+      (a.date + a.timeWindow) > (b.date + b.timeWindow) ? 1 : -1
+    );
+  } catch (e) {
+    console.error(e);
     return [];
   }
 }
 
-/**
- * Join a challenge and deduct the entry fee when accepted.
- *
- * Important behavior:
- * - The joining player pays when they accept/join.
- * - The creator also pays once, when the challenge becomes active.
- * - The challenge pot tracks total coins wagered.
- * - Coins are not deducted when the challenge is only created.
- */
 export async function joinChallengeInDb(
   challengeId,
   myUid,
@@ -51,19 +77,17 @@ export async function joinChallengeInDb(
       }
 
       const challenge = challengeSnap.data();
+      const existingJoined = challenge.joinedBy || [];
 
-      const alreadyJoined = (challenge.joinedBy || []).some(
-        user => user.uid === myUid
-      );
+      const alreadyJoined = existingJoined.some(user => user.uid === myUid);
 
       if (alreadyJoined || challenge.uid === myUid) {
         return;
       }
 
       const maxPlayers = challenge.maxPlayers || 2;
-      const existingJoined = challenge.joinedBy || [];
 
-      if (existingJoined.length + 1 >= maxPlayers) {
+      if (existingJoined.length >= maxPlayers - 1) {
         throw new Error("Challenge is full");
       }
 
@@ -85,7 +109,6 @@ export async function joinChallengeInDb(
       let potIncrease = 0;
       const updates = {};
 
-      // Deduct coins from the joining player.
       if (wager > 0) {
         tx.update(joinerRef, {
           coins: joinerCoins - wager,
@@ -94,8 +117,6 @@ export async function joinChallengeInDb(
         potIncrease += wager;
       }
 
-      // Deduct creator's coins once when the challenge first becomes active.
-      // This prevents taking coins at challenge creation.
       if (wager > 0 && !challenge.creatorPaid) {
         const creatorRef = doc(db, "users", challenge.uid);
         const creatorSnap = await tx.get(creatorRef);
@@ -183,24 +204,16 @@ function getChallengeWinner(participants, scores) {
     const scoreA = Number(scores[a.uid]);
     const scoreB = Number(scores[b.uid]);
 
-    // Golf scoring: lower score wins.
     if (scoreA !== scoreB) {
       return scoreA - scoreB;
     }
 
-    // Tie-breaker for now: higher OVR wins.
     return Number(b.ovr || 0) - Number(a.ovr || 0);
   });
 
   return scoredPlayers[0];
 }
 
-/**
- * Records a player's score.
- *
- * If all required players have scores, this settles the challenge and pays
- * the full pot to the winner once.
- */
 export async function recordChallengeScore(
   challengeId,
   myUid,
@@ -262,12 +275,7 @@ export async function recordChallengeScore(
       }
 
       const wager = Number(challenge.wager || 0);
-
-      // Prefer the tracked pot. If old challenge docs do not have pot yet,
-      // fall back to wager × number of participants.
-      payout =
-        Number(challenge.pot || 0) ||
-        wager * participants.length;
+      payout = Number(challenge.pot || 0) || wager * participants.length;
 
       const winnerRef = doc(db, "users", winner.uid);
       const winnerSnap = await tx.get(winnerRef);
@@ -320,7 +328,6 @@ export async function submitChallengeReview(challengeId, reviewerUid, review) {
     await updateDoc(doc(db, "challenges", challengeId), {
       [`reviews.${reviewerUid}`]: review,
     });
-
     return true;
   } catch (e) {
     console.error(e);
@@ -328,11 +335,6 @@ export async function submitChallengeReview(challengeId, reviewerUid, review) {
   }
 }
 
-/**
- * Manual settlement path.
- *
- * This also pays only once and pays the full pot, not just wager × 2.
- */
 export async function settleChallengeInDb(challengeId, winner, wager = 0) {
   try {
     await runTransaction(db, async tx => {
@@ -423,24 +425,10 @@ export async function expireChallengeIfNeeded(challengeId, challenge) {
 
 export function formatChallengeDate(dateStr) {
   if (!dateStr) return dateStr;
-
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(y, m - 1, d);
-
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-
-  const s =
-    d === 1 || d === 21 || d === 31
-      ? "st"
-      : d === 2 || d === 22
-        ? "nd"
-        : d === 3 || d === 23
-          ? "rd"
-          : "th";
-
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const s = d === 1 || d === 21 || d === 31 ? "st" : d === 2 || d === 22 ? "nd" : d === 3 || d === 23 ? "rd" : "th";
   return `${days[date.getDay()]}, ${months[m - 1]} ${d}${s}`;
 }
