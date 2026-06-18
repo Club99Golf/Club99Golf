@@ -35,7 +35,7 @@ export default function ChallengesTab(props) {
                 <ChallengeCard key={c.id} challenge={c} myUid={authUser?.uid} myUsername={profile.username} myCoins={profile.coins || 0}
                   onJoin={async (id, wager) => {
                     if (wager > 0) setProfile(p => ({ ...p, coins: Math.max(0, (p.coins || 0) - wager) }));
-                    const ok = await joinChallengeInDb(id, authUser.uid, profile.username, profile.ovr || 0);
+                    const ok = await joinChallengeInDb(challenge.id, authUser.uid, profile.username, profile.ovr, profile.profilePic || null);
                     if (ok) setChallenges(prev => prev.map(ch => ch.id === id ? { ...ch, joinedBy: [...(ch.joinedBy || []), { uid: authUser.uid, username: profile.username, ovr: profile.ovr || 0 }] } : ch));
                     else if (wager > 0) setProfile(p => ({ ...p, coins: (p.coins || 0) + wager }));
                   }}
