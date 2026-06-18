@@ -1,5 +1,5 @@
 export default function LeaderboardTab(props) {
-  const { ACCENT, S, Theme, acceptCrewRequest, authUser, createCrewBusy, createCrewError, createCrewInFirestore, createCrewName, crewBrowse, crewBrowseLoading, crewRequests, db, declineCrewRequest, doc, fetchPublicCrews, friendRequests, friendSearch, friendSearchBusy, friendSearchMsg, friendSearchResult, friends, getDoc, globalLeaderboard, handleFriendSearch, handleRespondRequest, handleSendRequest, leaderboard, leaderboardLoading, leaderboardView, leaveCrewInFirestore, myCrewData, profile, profilePic, requestJoinCrew, saveProfileToFirestore, sentCrewRequests, sentRequests, setCreateCrewBusy, setCreateCrewError, setCreateCrewName, setCrewBrowse, setCrewBrowseLoading, setCrewRequests, setFriendSearch, setLeaderboardView, setMyCrewData, setProfile, setSentCrewRequests, setShowCreateCrewModal, setViewingPic, setViewingProfile, showCreateCrewModal, skillTier, tab, username } = props;
+  const { S, Theme, acceptCrewRequest, authUser, createCrewBusy, createCrewError, createCrewInFirestore, createCrewName, crewBrowse, crewBrowseLoading, crewRequests, db, declineCrewRequest, doc, fetchPublicCrews, friendRequests, friendSearch, friendSearchBusy, friendSearchMsg, friendSearchResult, getDoc, globalLeaderboard, handleFriendSearch, handleRespondRequest, handleSendRequest, leaderboard, leaderboardLoading, leaderboardView, leaveCrewInFirestore, myCrewData, profile, profilePic, requestJoinCrew, saveProfileToFirestore, sentCrewRequests, sentRequests, setCreateCrewBusy, setCreateCrewError, setCreateCrewName, setCrewBrowse, setCrewBrowseLoading, setCrewRequests, setFriendSearch, setLeaderboardView, setMyCrewData, setProfile, setSentCrewRequests, setShowCreateCrewModal, setViewingPic, setViewingProfile, showCreateCrewModal, viewingPic, skillTier } = props;
   return (
         <>
         <div className="tab-scroll" style={{ paddingBottom: 80 }}>
@@ -25,7 +25,7 @@ export default function LeaderboardTab(props) {
                     <div key={req.id} style={{ background: "#fff", borderRadius: 12, border: "1px solid #e5e7eb", padding: "12px 14px", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <div style={{ fontSize: 13, fontWeight: 700 }}>🏌️ <strong>{req.fromUsername}</strong> wants to be friends</div>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => handleRespondRequest(req, true)} style={{ padding: "6px 12px", background: ACCENT, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Accept</button>
+                        <button onClick={() => handleRespondRequest(req, true)} style={{ padding: "6px 12px", background: Theme.primaryGreen, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Accept</button>
                         <button onClick={() => handleRespondRequest(req, false)} style={{ padding: "6px 12px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Ignore</button>
                       </div>
                     </div>
@@ -42,7 +42,7 @@ export default function LeaderboardTab(props) {
                 {friendSearchMsg && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>{friendSearchMsg}</div>}
                 {friendSearchResult && (
                   <div style={{ marginTop: 10, padding: "10px 12px", background: "#f9fafb", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div><div style={{ fontSize: 14, fontWeight: 900, fontFamily: "Bebas Neue" }}>{friendSearchResult.username}</div><div style={{ fontSize: 11, color: "#9ca3af" }}>OVR {friendSearchResult.ovr} · Lvl {friendSearchResult.level}</div></div>
+                    <div><div style={{ fontSize: 14, fontWeight: 900, fontFamily: "Bebas Neue" }}>{friendSearchResult.username}</div><div style={{ fontSize: 11, color: "#9ca3af" }}>OVR {friendSearchResult.ovr}</div></div>
                     <button onClick={() => handleSendRequest(friendSearchResult)} disabled={sentRequests.includes(friendSearchResult.uid)} style={{ padding: "7px 14px", background: sentRequests.includes(friendSearchResult.uid) ? "#f3f4f6" : Theme.primaryGreen, border: "none", borderRadius: 8, color: sentRequests.includes(friendSearchResult.uid) ? "#9ca3af" : "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
                       {sentRequests.includes(friendSearchResult.uid) ? "Sent!" : "Add Friend"}
                     </button>
@@ -68,13 +68,13 @@ export default function LeaderboardTab(props) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "Bebas Neue", letterSpacing: 1 }}>{u.username}{u.uid === authUser?.uid ? " (you)" : ""}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
-                      <span style={{ fontSize: 11, color: "#9ca3af" }}>Lvl {u.level || 1} · {u.history?.length || 0} rounds</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>{u.history?.length || 0} rounds</span>
                       {u.crewName && <span style={{ fontSize: 10, fontWeight: 800, color: Theme.primaryGreen, background: "rgba(125,162,126,0.1)", borderRadius: 6, padding: "1px 6px" }}>{u.crewName}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign: "center", flexShrink: 0 }}>
-                    <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen }}>{u.ovr}</div>
-                    {(() => { const t = skillTier(u.ovr || 50); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.8, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "1px 5px", whiteSpace: "nowrap" }}>{t.label}</div>; })()}
+                  <div style={{ width: 76, textAlign: "center", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen, lineHeight: 1 }}>{u.ovr}</div>
+                    {(() => { const t = skillTier(u.ovr || 50); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.6, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "2px 7px", whiteSpace: "nowrap", textAlign: "center", minWidth: 64 }}>{t.label}</div>; })()}
                   </div>
                 </div>
               ))}
@@ -109,11 +109,11 @@ export default function LeaderboardTab(props) {
                             {isLeader && <span style={{ fontSize: 12 }}>⭐</span>}
                             {isMe && <span style={{ fontSize: 10, fontWeight: 700, color: Theme.primaryGreen }}>(you)</span>}
                           </div>
-                          <div style={{ fontSize: 11, color: "#9ca3af" }}>Lvl {m.level || 1}</div>
+                          <div style={{ fontSize: 11, color: "#9ca3af" }}>{isLeader ? "Crew Leader" : "Crew Member"}</div>
                         </div>
-                        <div style={{ textAlign: "center", flexShrink: 0 }}>
-                          <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen }}>{m.ovr || "—"}</div>
-                          {m.ovr && (() => { const t = skillTier(m.ovr); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.8, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "1px 5px", whiteSpace: "nowrap" }}>{t.label}</div>; })()}
+                        <div style={{ width: 76, textAlign: "center", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen, lineHeight: 1 }}>{m.ovr || "—"}</div>
+                          {m.ovr && (() => { const t = skillTier(m.ovr); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.6, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "2px 7px", whiteSpace: "nowrap", textAlign: "center", minWidth: 64 }}>{t.label}</div>; })()}
                         </div>
                       </div>
                     );
@@ -138,7 +138,7 @@ export default function LeaderboardTab(props) {
                                 setCrewRequests(prev => prev.filter(r => r.id !== req.id));
                               } catch (e) { alert(e.message === "CREW_FULL" ? "Crew is full (8 max)" : "Failed to accept"); }
                             }}
-                            style={{ padding: "6px 12px", background: ACCENT, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                            style={{ padding: "6px 12px", background: Theme.primaryGreen, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
                           >Accept</button>
                           <button
                             onClick={async () => { await declineCrewRequest(req.id); setCrewRequests(prev => prev.filter(r => r.id !== req.id)); }}
@@ -231,13 +231,13 @@ export default function LeaderboardTab(props) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 900, fontFamily: "Bebas Neue", letterSpacing: 1 }}>{u.username}{u.uid === authUser?.uid ? " (you)" : ""}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
-                      <span style={{ fontSize: 11, color: "#9ca3af" }}>Lvl {u.level || 1} · {u.history?.length || 0} rounds</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>{u.history?.length || 0} rounds</span>
                       {u.crewName && <span style={{ fontSize: 10, fontWeight: 800, color: Theme.primaryGreen, background: "rgba(125,162,126,0.1)", borderRadius: 6, padding: "1px 6px" }}>{u.crewName}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign: "center", flexShrink: 0 }}>
-                    <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen }}>{u.ovr}</div>
-                    {(() => { const t = skillTier(u.ovr || 50); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.8, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "1px 5px", whiteSpace: "nowrap" }}>{t.label}</div>; })()}
+                  <div style={{ width: 76, textAlign: "center", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 900, fontFamily: "Bebas Neue", color: Theme.primaryGreen, lineHeight: 1 }}>{u.ovr}</div>
+                    {(() => { const t = skillTier(u.ovr || 50); return <div style={{ fontSize: 7, fontWeight: 800, color: t.color, letterSpacing: 0.6, background: t.bg, border: `1px solid ${t.border}`, borderRadius: 10, padding: "2px 7px", whiteSpace: "nowrap", textAlign: "center", minWidth: 64 }}>{t.label}</div>; })()}
                   </div>
                 </div>
               ))}
@@ -249,6 +249,15 @@ export default function LeaderboardTab(props) {
             </div>
           )}
         </div>
+
+
+        {/* ── Profile Picture Viewer ── */}
+        {viewingPic && (
+          <div onClick={() => setViewingPic(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 18 }}>
+            <img src={viewingPic} alt="Profile" style={{ width: "min(86vw, 420px)", maxHeight: "82vh", borderRadius: 18, objectFit: "contain", background: "#111" }} />
+            <button onClick={() => setViewingPic(null)} style={{ position: "absolute", top: 20, right: 20, background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: "50%", width: 42, height: 42, color: "#fff", fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        )}
 
         {/* ── Create Crew Modal ── */}
         {showCreateCrewModal && (
