@@ -1,0 +1,7 @@
+.app-shell { min-height: 100dvh; background: #f4f5f7; }
+.tab-scroll { height: 100dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); padding: 24px; }
+.modal-card { width: 100%; max-width: 420px; background: #fff; border-radius: 20px; padding: 24px; }
+.flash-banner { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 16px; right: 16px; z-index: 1000; border-radius: 14px; padding: 12px 14px; font-weight: 800; text-align: center; }
+.flash-banner--success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.flash-banner--error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
