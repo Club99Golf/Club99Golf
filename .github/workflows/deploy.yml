@@ -30,7 +30,9 @@ jobs:
         run: npm run build
 
       - name: Sync Capacitor iOS
-        run: npx cap sync ios
+        run: |
+          npm install typescript
+          npx cap sync ios
 
       - name: Setup App Store Connect Private Key
         run: |
