@@ -3,10 +3,9 @@ import {
   getAuth,
   initializeAuth,
   browserLocalPersistence,
-  browserSessionPersistence,
   indexedDBLocalPersistence
 } from "firebase/auth";
-import { getFirestore, initializeFirestore, persistentLocalCache } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 export const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyCtvMnSnohd3GvTvgT0qFEUaHhp6KFnyR8",
@@ -29,3 +28,5 @@ export const auth = (() => {
     return getAuth(firebaseApp);
   }
 })();
+
+export const db = getFirestore(firebaseApp);
