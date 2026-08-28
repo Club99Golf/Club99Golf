@@ -29,11 +29,10 @@ jobs:
           CI: false
         run: npm run build
 
-      - name: Sync Capacitor & Install iOS Pods
+      - name: Sync Capacitor iOS
         run: |
           npm install typescript
           npx cap sync ios
-          cd ios/App && pod install
 
       - name: Setup App Store Connect Private Key
         env:
@@ -48,7 +47,7 @@ jobs:
           API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
         run: |
-          xcodebuild -workspace ios/App/App.xcworkspace \
+          xcodebuild -project ios/App/App.xcodeproj \
             -scheme App \
             -destination "generic/platform=iOS" \
             -archivePath $RUNNER_TEMP/App.xcarchive \
