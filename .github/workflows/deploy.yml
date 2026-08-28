@@ -29,10 +29,11 @@ jobs:
           CI: false
         run: npm run build
 
-      - name: Sync Capacitor iOS
+      - name: Sync Capacitor & Install iOS Pods
         run: |
           npm install typescript
           npx cap sync ios
+          cd ios/App && pod install
 
       - name: Setup App Store Connect Private Key
         env:
