@@ -25,6 +25,8 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Build Web Production Assets
+        env:
+          CI: false
         run: npm run build
 
       - name: Sync Capacitor iOS
