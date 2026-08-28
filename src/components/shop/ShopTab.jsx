@@ -154,39 +154,70 @@ export default function ShopTab(props) {
               const equipped = profile[`equipped${item.type.charAt(0).toUpperCase() + item.type.slice(1)}`] === item.id;
               const canAfford = COINS >= item.price;
               const meetsLevel = true;
+
+              // Tier lock check
+              const tierLocked = (item.tier === "pro" && subscription !== "pro") ||
+                                 (item.tier === "basic" && subscription === "free");
+              const tierLabel = item.tier === "pro" ? "PRO" : "BASIC";
+              const tierColor = item.tier === "pro" ? Theme.mutedGold : "#3b82f6";
+              const tierBg    = item.tier === "pro" ? "#fffbeb" : "#eff6ff";
+
               return (
-                <div key={item.id} style={{ background: equipped ? "rgba(125,162,126,0.05)" : "#fff", borderRadius: 14, border: equipped ? `2px solid ${Theme.primaryGreen}` : "1px solid #e5e7eb", padding: "14px", marginBottom: 10, display: "flex", gap: 14, alignItems: "center" }}>
+                <div key={item.id} style={{ background: tierLocked ? "#f9fafb" : equipped ? "rgba(125,162,126,0.05)" : "#fff", borderRadius: 14, border: tierLocked ? "1px solid #e5e7eb" : equipped ? `2px solid ${Theme.primaryGreen}` : "1px solid #e5e7eb", padding: "14px", marginBottom: 10, display: "flex", gap: 14, alignItems: "center", opacity: tierLocked ? 0.75 : 1 }}>
                   {/* Preview */}
-                  <div style={{ width: 52, height: 52, borderRadius: 10, flexShrink: 0, overflow: "hidden", position: "relative", ...(item.type === "banner" ? { background: item.preview } : { background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center" }) }} className={item.type === "banner" && item.animated === "shimmer" ? "banner-shimmer" : item.type === "banner" && item.animated === "aurora" ? "banner-aurora" : ""}>
+                  <div style={{ width: 52, height: 52, borderRadius: 10, flexShrink: 0, overflow: "hidden", position: "relative", filter: tierLocked ? "grayscale(60%)" : "none", ...(item.type === "banner" ? { background: item.preview } : { background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center" }) }} className={item.type === "banner" && item.animated === "shimmer" ? "banner-shimmer" : item.type === "banner" && item.animated === "aurora" ? "banner-aurora" : ""}>
                     {item.type === "border" && <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#e5e7eb", ...item.style }} />}
                     {item.type === "nameplate" && <div style={{ fontSize: 11, fontWeight: 900, fontFamily: "Bebas Neue", ...item.style }}>ABC</div>}
                     {item.type === "boost" && <div style={{ fontSize: 22 }}>⚡</div>}
                     {item.seasonal && <div style={{ position: "absolute", top: 3, right: 3, background: "rgba(0,0,0,0.6)", borderRadius: 4, padding: "1px 4px", fontSize: 7, fontWeight: 800, color: "#fff" }}>{item.seasonLabel}</div>}
+                    {/* Tier lock overlay */}
+                    {tierLocked && (
+                      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 10 }}>
+                        <span style={{ fontSize: 16 }}>🔒</span>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", marginBottom: 2 }}>{item.label}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: tierLocked ? "#9ca3af" : "#111827" }}>{item.label}</span>
+                      {tierLocked && (
+                        <span style={{ fontSize: 9, fontWeight: 800, color: tierColor, background: tierBg, border: `1px solid ${tierColor}44`, borderRadius: 5, padding: "2px 6px", letterSpacing: 0.5 }}>🔒 {tierLabel}</span>
+                      )}
+                      {item.tag && !tierLocked && <span style={{ fontSize: 9, fontWeight: 800, color: item.tag === "LEGENDARY" ? Theme.mutedGold : Theme.primaryGreen, background: item.tag === "LEGENDARY" ? "#fffbeb" : "rgba(125,162,126,0.1)", borderRadius: 5, padding: "2px 6px", letterSpacing: 0.5 }}>{item.tag}</span>}
+                    </div>
                     {item.type === "boost" && <div style={{ fontSize: 11, color: "#9ca3af" }}>{item.desc}</div>}
-                    <div style={{ fontSize: 11, color: "#9ca3af" }}>🪙 {item.price.toLocaleString()}</div>
+                    {tierLocked
+                      ? <div style={{ fontSize: 11, color: tierColor, fontWeight: 700, marginTop: 1 }}>Requires {tierLabel} subscription</div>
+                      : <div style={{ fontSize: 11, color: "#9ca3af" }}>🪙 {item.price.toLocaleString()}</div>
+                    }
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5, flexShrink: 0 }}>
-                    {item.type !== "boost" && (
-                      <button onClick={() => setShopPreview(item)} style={{ padding: "7px 12px", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 8, color: "#374151", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                        Preview
+                    {tierLocked ? (
+                      <button onClick={() => alert(`Upgrade to ${tierLabel} to unlock this item!`)} style={{ padding: "7px 12px", background: tierBg, border: `1px solid ${tierColor}44`, borderRadius: 8, color: tierColor, fontWeight: 800, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}>
+                        🔒 {tierLabel}
                       </button>
-                    )}
-                    {owned ? (
-                      item.type !== "boost" ? (
-                        <button onClick={() => {
-                          const key = `equipped${item.type.charAt(0).toUpperCase() + item.type.slice(1)}`;
-                          setProfile(p => ({ ...p, [key]: p[key] === item.id ? null : item.id }));
-                        }} style={{ padding: "7px 12px", background: equipped ? "rgba(125,162,126,0.1)" : "#f9fafb", border: `1px solid ${equipped ? Theme.primaryGreen : "#e5e7eb"}`, borderRadius: 8, color: equipped ? Theme.primaryGreen : "#374151", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-                          {equipped ? "Equipped ✓" : "Equip"}
-                        </button>
-                      ) : <div style={{ fontSize: 12, color: Theme.primaryGreen, fontWeight: 700 }}>Owned</div>
                     ) : (
-                      <button onClick={() => setShopConfirm(item)} disabled={!canAfford || !meetsLevel} style={{ padding: "7px 12px", background: canAfford && meetsLevel ? Theme.primaryGreen : "#f3f4f6", border: "none", borderRadius: 8, color: canAfford && meetsLevel ? "#fff" : "#9ca3af", fontWeight: 700, fontSize: 12, cursor: canAfford && meetsLevel ? "pointer" : "default" }}>
-                        {!meetsLevel ? `Lvl ${item.level}` : !canAfford ? "Need 🪙" : `Buy`}
-                      </button>
+                      <>
+                        {item.type !== "boost" && (
+                          <button onClick={() => setShopPreview(item)} style={{ padding: "7px 12px", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 8, color: "#374151", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                            Preview
+                          </button>
+                        )}
+                        {owned ? (
+                          item.type !== "boost" ? (
+                            <button onClick={() => {
+                              const key = `equipped${item.type.charAt(0).toUpperCase() + item.type.slice(1)}`;
+                              setProfile(p => ({ ...p, [key]: p[key] === item.id ? null : item.id }));
+                            }} style={{ padding: "7px 12px", background: equipped ? "rgba(125,162,126,0.1)" : "#f9fafb", border: `1px solid ${equipped ? Theme.primaryGreen : "#e5e7eb"}`, borderRadius: 8, color: equipped ? Theme.primaryGreen : "#374151", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              {equipped ? "Equipped ✓" : "Equip"}
+                            </button>
+                          ) : <div style={{ fontSize: 12, color: Theme.primaryGreen, fontWeight: 700 }}>Owned</div>
+                        ) : (
+                          <button onClick={() => setShopConfirm(item)} disabled={!canAfford || !meetsLevel} style={{ padding: "7px 12px", background: canAfford && meetsLevel ? Theme.primaryGreen : "#f3f4f6", border: "none", borderRadius: 8, color: canAfford && meetsLevel ? "#fff" : "#9ca3af", fontWeight: 700, fontSize: 12, cursor: canAfford && meetsLevel ? "pointer" : "default" }}>
+                            {!meetsLevel ? `Lvl ${item.level}` : !canAfford ? "Need 🪙" : `Buy`}
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

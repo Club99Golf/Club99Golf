@@ -72,7 +72,7 @@ export default function ProfileTab(props) {
                     >
                       <div
                         key={`ovr-${isHandicapView}`}
-                        style={{ fontSize: 64, fontWeight: 900, fontFamily: "Bebas Neue", color: "#fff", lineHeight: 1, animation: "countUp 0.35s ease", letterSpacing: isHandicapView ? 0 : 2 }}
+                        style={{ fontSize: 64, fontWeight: 900, fontFamily: "Bebas Neue", color: "#fff", lineHeight: 1, animation: "countUp 0.35s ease", letterSpacing: isHandicapView ? 0 : 2, textShadow: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 6px rgba(0,0,0,0.5)" }}
                       >
                         {bigNum}
                       </div>
