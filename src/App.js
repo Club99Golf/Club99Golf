@@ -10,8 +10,6 @@ import {
   deleteUser,
   reauthenticateWithCredential,
   EmailAuthProvider,
-  setPersistence,
-  browserLocalPersistence,
 } from "firebase/auth";
 import {
   doc,
@@ -23,7 +21,6 @@ import {
   where,
   limit,
   deleteDoc,
-  addDoc,
   serverTimestamp,
   onSnapshot,
   updateDoc,
@@ -46,7 +43,7 @@ import { loadLeaderboard } from "./services/leaderboardService";
 import { removeFriendInDb, searchUserByUsername, sendFriendRequest, respondToFriendRequest, loadFriends } from "./services/friendService";
 import { createCrewInFirestore, requestJoinCrew, acceptCrewRequest, declineCrewRequest, leaveCrewInFirestore, fetchPublicCrews } from "./services/crewService";
 import { loadReactions } from "./services/reactionService";
-import { loadChallenges, joinChallengeInDb, deleteChallengeInDb, recordChallengeScore, submitChallengeReview, settleChallengeInDb } from "./services/challengeService";
+import { loadChallenges, joinChallengeInDb, deleteChallengeInDb, recordChallengeScore, submitChallengeReview, settleChallengeInDb, createChallengeInDb } from "./services/challengeService";
 import { hapticTap, haversineYards, bearingDeg, calculateWindEffect, offsetLatLng, _isWaterAtPoint, computeGreenPoints, getPlaysLikeDistance, degToArrow } from "./utils/mapMath";
 import { getCourseData, getCourseHolePars, calcRoundOVR, calcOVRFromRounds, skillTier, suggestClub } from "./utils/golfScoring";
 import { calcHandicapIndex } from "./utils/handicap";
@@ -61,6 +58,7 @@ import MapPolyline from "./components/map/MapPolyline";
 import MapCircle from "./components/map/MapCircle";
 import ProfileTab from "./components/profile/ProfileTab";
 import LiveRoundTab from "./components/rounds/LiveRoundTab";
+import RoundDetailModal from "./components/rounds/RoundDetailModal";
 import LeaderboardTab from "./components/leaderboard/LeaderboardTab";
 import ChallengesTab from "./components/challenges/ChallengesTab";
 import BagTab from "./components/bag/BagTab";
@@ -721,8 +719,9 @@ export default function GolfApp() {
       return;
     }
 
-    if (CHALLENGE_FEE > 0 && (profile.coins || 0) < CHALLENGE_FEE) {
-      setChallengePostError(`You need ${CHALLENGE_FEE.toLocaleString()} coins to post a challenge. Your balance: ${(profile.coins || 0).toLocaleString()}.`);
+    const wager = challengeForm.wager ? parseInt(challengeForm.wager) : 0;
+    if ((profile.coins || 0) < CHALLENGE_FEE + wager) {
+      setChallengePostError(`You need ${(CHALLENGE_FEE + wager).toLocaleString()} coins to post this challenge. Your balance: ${(profile.coins || 0).toLocaleString()}.`);
       return;
     }
 
@@ -735,10 +734,8 @@ export default function GolfApp() {
     };
 
     const timeWindow = `${fmt(challengeForm.timeFrom)} – ${fmt(challengeForm.timeTo)}`;
-    const tempId = `temp_${Date.now()}`;
-    const wager = challengeForm.wager ? parseInt(challengeForm.wager) : 0;
 
-    const newChallenge = {
+    const firestoreDoc = {
       uid: authUser.uid,
       username: profile.username,
       profilePic: profile.profilePic || profilePic || null,
@@ -756,13 +753,31 @@ export default function GolfApp() {
       holes: challengeForm.holes,
       nineHolesSide: challengeForm.holes === 9 ? challengeForm.nineHolesSide : null,
       joinedBy: [],
-      creatorPaid: false,
-      pot: 0,
       status: "open",
       settled: false,
       paidOut: false,
+      createdAt: serverTimestamp(),
+    };
+
+    // Deduct the creator's entry fee + wager and create the challenge doc
+    // atomically, so coins leave the balance right away instead of waiting
+    // for someone to join.
+    const result = await createChallengeInDb(firestoreDoc, authUser.uid);
+
+    if (result?.error) {
+      setChallengePostError(result.error);
+      setChallengeBusy(false);
+      return;
+    }
+
+    setProfile(p => ({ ...p, coins: (p.coins || 0) - CHALLENGE_FEE - wager }));
+
+    const newChallenge = {
+      ...firestoreDoc,
+      creatorPaid: true,
+      pot: wager > 0 ? wager : 0,
       createdAt: new Date(),
-      id: tempId,
+      id: result.id,
     };
 
     setChallenges(prev =>
@@ -774,46 +789,6 @@ export default function GolfApp() {
     setShowChallengeModal(false);
     setChallengeForm({ courseQuery: "", courseName: "", date: "", timeFrom: "", timeTo: "", message: "", wager: "", format: "stroke", playerCount: 2, slots: ["A", "B"], teeColor: "white", holes: 18, nineHolesSide: "front" });
     setChallengeCourseSuggestions([]);
-
-    console.log("Posting challenge:", newChallenge);
-
-    try {
-      const firestoreDoc = {
-        uid: newChallenge.uid,
-        username: newChallenge.username,
-        profilePic: profile.profilePic || profilePic || null,
-        ovr: newChallenge.ovr,
-        course: newChallenge.course,
-        date: newChallenge.date,
-        timeWindow: newChallenge.timeWindow,
-        message: newChallenge.message,
-        wager: newChallenge.wager,
-        entryFee: CHALLENGE_FEE,
-        format: newChallenge.format,
-        maxPlayers: newChallenge.maxPlayers,
-        teamAssignments: newChallenge.teamAssignments,
-        teeColor: newChallenge.teeColor,
-        holes: newChallenge.holes,
-        nineHolesSide: newChallenge.nineHolesSide,
-        joinedBy: [],
-        creatorPaid: false,
-        pot: 0,
-        status: "open",
-        settled: false,
-        paidOut: false,
-        createdAt: serverTimestamp(),
-      };
-
-      const ref = await addDoc(collection(db, "challenges"), firestoreDoc);
-
-      setChallenges(prev =>
-        prev.map(c => c.id === tempId ? { ...c, id: ref.id } : c)
-      );
-    } catch (e) {
-      console.error("Failed to sync challenge to Firestore:", e);
-      const code = e?.code || e?.message || "unknown";
-      setChallengePostError(`Saved locally but not synced (${code}). It will disappear on refresh.`);
-    }
 
     setChallengeBusy(false);
   }
@@ -924,15 +899,21 @@ export default function GolfApp() {
     }
   }, [profile]);
 
-  // Real-time listener: detect when another user (crew leader) sets crewId on our profile
+  // Real-time listener: detect when another user (crew leader) sets crewId on
+  // our profile, or another device (e.g. an opponent settling a challenge)
+  // updates our coin balance — without this, a payout only shows up after
+  // the next full login since it's written directly by the other player's
+  // device rather than through our own local state.
   useEffect(() => {
     if (!authUser) return;
     const unsub = onSnapshot(doc(db, "users", authUser.uid), snap => {
       if (!snap.exists() || !profileLoadedRef.current) return;
-      const { crewId, crewName } = snap.data();
+      const { crewId, crewName, coins } = snap.data();
       setProfile(p => {
-        if ((p.crewId || null) === (crewId || null) && (p.crewName || null) === (crewName || null)) return p;
-        return { ...p, crewId: crewId || null, crewName: crewName || null };
+        const sameCrew = (p.crewId || null) === (crewId || null) && (p.crewName || null) === (crewName || null);
+        const sameCoins = (p.coins || 0) === (coins || 0);
+        if (sameCrew && sameCoins) return p;
+        return { ...p, crewId: crewId || null, crewName: crewName || null, coins: coins || 0 };
       });
     });
     return unsub;
@@ -960,7 +941,6 @@ export default function GolfApp() {
     }, 12000);
 
     try {
-      await setPersistence(auth, browserLocalPersistence);
       await signInWithEmailAndPassword(auth, authEmail, authPassword);
       clearTimeout(timeoutId);
       setAuthBusy(false);
@@ -1925,17 +1905,19 @@ export default function GolfApp() {
     <div style={{ height: "100dvh", overflow: "hidden", fontFamily: "'DM Sans', sans-serif" }}>
       {/* Flash Banner */}
       {flash && (
-        <div onClick={() => setFlash(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 999, padding: "14px 20px", background: flash.type === "up" ? ACCENT : "#ef4444", color: "#fff", textAlign: "center", fontSize: 15, fontWeight: 900, letterSpacing: 2, fontFamily: "Bebas Neue", cursor: "pointer", animation: "fadeUp 0.3s ease" }}>
+        <div onClick={() => setFlash(null)} style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 999, paddingTop: "calc(14px + env(safe-area-inset-top))", paddingBottom: 14, paddingLeft: 20, paddingRight: 20, background: flash.type === "up" ? ACCENT : "#ef4444", color: "#fff", textAlign: "center", fontSize: 15, fontWeight: 900, letterSpacing: 2, fontFamily: "Bebas Neue", cursor: "pointer", animation: "fadeUp 0.3s ease" }}>
           {flash.msg}
         </div>
       )}
       {/* Badge Flash */}
       {badgeFlash && (
-        <div onClick={() => setBadgeFlash(null)} style={{ position: "fixed", top: flash ? 50 : 0, left: 0, right: 0, zIndex: 998, padding: "12px 20px", background: "#fff", borderBottom: "2px solid #fbbf24", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", animation: "fadeUp 0.3s ease" }}>
+        <div onClick={() => setBadgeFlash(null)} style={{ position: "fixed", top: flash ? "calc(64px + env(safe-area-inset-top))" : 0, left: 0, right: 0, zIndex: 998, paddingTop: flash ? 12 : "calc(12px + env(safe-area-inset-top))", paddingBottom: 12, paddingLeft: 20, paddingRight: 20, background: "#fff", borderBottom: "2px solid #fbbf24", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", animation: "fadeUp 0.3s ease" }}>
           <BadgeIcon id={badgeFlash.id} size={28} />
           <div><div style={{ fontSize: 11, fontWeight: 800, color: "#f59e0b", letterSpacing: 1 }}>BADGE UNLOCKED</div><div style={{ fontSize: 14, fontWeight: 900, color: "#111827" }}>{badgeFlash.label}</div></div>
         </div>
       )}
+
+      <RoundDetailModal {...appCtx} />
 
       {/* ── PROFILE TAB ── */}
       {tab === "profile" && !liveRound && <ProfileTab {...appCtx} />}

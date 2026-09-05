@@ -1,14 +1,18 @@
 import { getCourseData } from "./golfScoring";
 
 export function calcHandicapIndex(history) {
-  const rounds18 = (history || []).filter(r => r.holes === "18");
-  if (rounds18.length === 0) return null;
-  const recent = rounds18.slice(0, 20); // cap at 20
+  const eligible = (history || []).filter(r => r.holes === "18" || r.holes === "9");
+  if (eligible.length === 0) return null;
+  const recent = eligible.slice(0, 20); // cap at 20
   const diffs = recent.map(r => {
     const cd = getCourseData(r.course, r.tee);
     const rating = cd?.rating ?? 72.0;
     const slope  = cd?.slope  ?? 113;
-    return (r.score - rating) * (113 / slope);
+    // 9-hole rounds are scaled to an 18-hole-equivalent score before diffing,
+    // same normalization calcRoundOVR uses, so they aren't compared directly
+    // against a full 18-hole course rating.
+    const adjScore = r.holes === "9" ? r.score * 2 : r.score;
+    return (adjScore - rating) * (113 / slope);
   });
   const n = diffs.length;
   const numBest =

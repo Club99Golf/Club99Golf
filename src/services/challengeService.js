@@ -10,6 +10,39 @@ import {
 import { db } from "../config/firebase";
 import { CHALLENGE_FORMATS } from "../config/constants";
 
+// Creates the challenge doc and deducts the creator's entry fee + wager in the
+// same transaction, so coins leave the creator's balance immediately at post
+// time instead of waiting for the first join (previously the creator was only
+// ever charged inside joinChallengeInDb, via the creatorPaid gate below).
+export async function createChallengeInDb(challengeData, creatorUid) {
+  const challengeRef = doc(collection(db, "challenges"));
+  try {
+    await runTransaction(db, async tx => {
+      const creatorRef = doc(db, "users", creatorUid);
+      const creatorSnap = await tx.get(creatorRef);
+      if (!creatorSnap.exists()) throw new Error("User not found");
+
+      const wager = Number(challengeData.wager || 0);
+      const entryFee = Number(challengeData.entryFee || 0);
+      const creatorCoins = Number(creatorSnap.data().coins || 0);
+      if (creatorCoins < entryFee + wager) {
+        throw new Error(`You need ${(entryFee + wager).toLocaleString()} coins to post this challenge.`);
+      }
+
+      tx.update(creatorRef, { coins: creatorCoins - entryFee - wager });
+      tx.set(challengeRef, {
+        ...challengeData,
+        creatorPaid: true,
+        pot: wager > 0 ? wager : 0,
+      });
+    });
+    return { id: challengeRef.id };
+  } catch (e) {
+    console.error(e);
+    return { error: e?.message || "Failed to post challenge" };
+  }
+}
+
 export async function loadChallenges() {
   try {
     const snap = await getDocs(collection(db, "challenges"));
