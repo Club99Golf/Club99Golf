@@ -8,7 +8,7 @@ import {
 import { getFirestore } from "firebase/firestore";
 
 export const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyCtvMnSnohd3GvTvgT0qFEUaHhp6KFnyR8",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "AIzaSyCtvMnSnohd3GvTvgT0qfEUaHhp6KFnyR8",
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "golf-app-9c01f.firebaseapp.com",
   projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "golf-app-9c01f",
   storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "golf-app-9c01f.appspot.com",
